@@ -486,8 +486,10 @@ export default {
           key: "item_name",
         },
         { title: __("QTY"), key: "qty", align: "center" },
-        { title: __("UOM"), key: "uom", align: "center" },
         { title: __("Rate"), key: "rate", align: "center" },
+        { title: __("Pre-Tax Rate"), key: "pre_tax_rate", align: "center" },
+        { title: __("Tax"), key: "tax", align: "center" },
+        { title: __("Tax Rate"), key: "tax_rate", align: "center" },
         { title: __("Amount"), key: "amount", align: "center" },
         { title: __("Offer?"), key: "posa_is_offer", align: "center" },
       ],
@@ -686,11 +688,10 @@ export default {
   if (!item.uom) {
     item.uom = item.stock_uom;
   }
-  
-  // Check if this is a free item from an offer
+
   const isFreeItem = item.free_from_offer || false;
-  
   let index = -1;
+
   if (!this.new_line) {
     index = this.items.findIndex(
       (el) =>
@@ -705,50 +706,62 @@ export default {
   let new_item;
   if (index === -1 || this.new_line) {
     new_item = this.get_new_item(item);
-    // Handle serial number logic
+
+    // Serial Number Logic
     if (item.has_serial_no && item.to_set_serial_no) {
       new_item.serial_no_selected = [];
       new_item.serial_no_selected.push(item.to_set_serial_no);
       item.to_set_serial_no = null;
     }
-    // Handle batch number logic
+
+    // Batch Number Logic
     if (item.has_batch_no && item.to_set_batch_no) {
       new_item.batch_no = item.to_set_batch_no;
       item.to_set_batch_no = null;
       item.batch_no = null;
       this.set_batch_qty(new_item, new_item.batch_no, false);
     }
-    // Make quantity negative for returns
+
+    // Return quantity logic
     if (this.invoiceType === "Return") {
       new_item.qty = -Math.abs(new_item.qty || 1);
     }
+
+    // === Tax Calculations ===
+    const taxRate = item.rate < this.pos_profile.custom_tax_limit ? 5 : 12;
+    const tax = item.rate * (taxRate / 100);
+    const preTaxRate = item.rate - tax;
+
+    new_item.tax_rate = taxRate;
+    new_item.tax = tax;
+    new_item.pre_tax_rate = preTaxRate;
+    // ========================
+
     this.items.unshift(new_item);
     this.update_item_detail(new_item);
 
-    // Expand new item if it has batch or serial number
+    // Expand if serial or batch exists
     if ((!this.pos_profile.posa_auto_set_batch && new_item.has_batch_no) || new_item.has_serial_no) {
       this.$nextTick(() => {
         this.expanded = [new_item.posa_row_id];
       });
     }
-    
-    // Process Buy-Get offers for auto-adding free items
-    // Only do this for regular items, not for free items being added
+
     if (!isFreeItem) {
       this.$nextTick(() => {
         this.processBuyGetOffers(new_item);
       });
     }
+
   } else {
     const cur_item = this.items[index];
     this.update_items_details([cur_item]);
-    // Serial number logic for existing item
+
+    // Serial Number Check
     if (item.has_serial_no && item.to_set_serial_no) {
       if (cur_item.serial_no_selected.includes(item.to_set_serial_no)) {
         this.eventBus.emit("show_message", {
-          title: __(`This Serial Number {0} has already been added!`, [
-            item.to_set_serial_no,
-          ]),
+          title: __(`This Serial Number {0} has already been added!`, [item.to_set_serial_no]),
           color: "warning",
         });
         item.to_set_serial_no = null;
@@ -757,40 +770,47 @@ export default {
       cur_item.serial_no_selected.push(item.to_set_serial_no);
       item.to_set_serial_no = null;
     }
-    
-    // For returns, subtract from quantity to make it more negative
+
     if (this.invoiceType === "Return") {
       cur_item.qty -= (item.qty || 1);
     } else {
       cur_item.qty += (item.qty || 1);
     }
+
     this.calc_stock_qty(cur_item, cur_item.qty);
-    
-    // Update batch quantity if needed
+
     if (cur_item.has_batch_no && cur_item.batch_no) {
       this.set_batch_qty(cur_item, cur_item.batch_no, false);
     }
-    
+
     this.set_serial_no(cur_item);
-    
-    // Process Buy-Get offers for updated item
-    // Only do this for regular items, not for free items
+
+    // === Tax Recalculation for Existing Item ===
+    const taxRate = cur_item.rate < this.pos_profile.custom_tax_limit ? 5 : 12;
+    const tax = cur_item.rate * (taxRate / 100);
+    const preTaxRate = cur_item.rate - tax;
+
+    cur_item.tax_rate = taxRate;
+    cur_item.tax = tax;
+    cur_item.pre_tax_rate = preTaxRate;
+    // ===========================================
+
     if (!isFreeItem && !cur_item.posa_is_offer) {
       this.$nextTick(() => {
         this.processBuyGetOffers(cur_item);
       });
     }
   }
-  
+
   this.$forceUpdate();
-  
-  // Only try to expand if new_item exists and should be expanded
+
   if (new_item && ((!this.pos_profile.posa_auto_set_batch && new_item.has_batch_no) || new_item.has_serial_no)) {
     this.expanded = [new_item.posa_row_id];
   }
-  
+
   return new_item;
 },
+
 
 processBuyGetOffers(addedItem) {
   // Skip if no offers or no valid item
