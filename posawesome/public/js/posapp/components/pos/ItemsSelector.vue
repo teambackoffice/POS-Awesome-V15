@@ -294,7 +294,7 @@ export default {
           key: "item_code",
         },
         { title: __("Rate"), key: "rate", align: "start" },
-        { title: __("Available QTY"), key: "actual_qty", align: "start" },
+        { title: __("Avail Qty"), key: "actual_qty", align: "start" },
         { title: __("UOM"), key: "stock_uom", align: "start" },
       ];
       if (!this.pos_profile.posa_display_item_code) {

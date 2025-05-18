@@ -487,11 +487,12 @@ export default {
         },
         { title: __("QTY"), key: "qty", align: "center" },
         { title: __("Rate"), key: "rate", align: "center" },
-        { title: __("Pre-Tax Rate"), key: "pre_tax_rate", align: "center" },
+        { title: __("B.Tax Rate"), key: "pre_tax_rate", align: "center" },
         { title: __("Tax"), key: "tax", align: "center" },
         { title: __("Tax Rate"), key: "tax_rate", align: "center" },
+        { title: __("B.Tax Amount"), key: "b_amount", align: "center" },
         { title: __("Amount"), key: "amount", align: "center" },
-        { title: __("Offer?"), key: "posa_is_offer", align: "center" },
+        // { title: __("Offer?"), key: "posa_is_offer", align: "center" },
       ],
       selected_currency: "", // Currently selected currency
       exchange_rate: 1, // Current exchange rate
@@ -729,12 +730,13 @@ export default {
 
     // === Tax Calculations ===
     const taxRate = item.rate < this.pos_profile.custom_tax_limit ? 5 : 12;
-    const tax = item.rate * (taxRate / 100);
+    const tax = (item.rate * (taxRate / 100).toFixed(2));
     const preTaxRate = item.rate - tax;
 
     new_item.tax_rate = taxRate;
     new_item.tax = tax;
     new_item.pre_tax_rate = preTaxRate;
+    new_item.b_amount = preTaxRate * (new_item.qty || 1);
     // ========================
 
     this.items.unshift(new_item);
@@ -787,12 +789,15 @@ export default {
 
     // === Tax Recalculation for Existing Item ===
     const taxRate = cur_item.rate < this.pos_profile.custom_tax_limit ? 5 : 12;
-    const tax = cur_item.rate * (taxRate / 100);
+    const tax = (cur_item.rate * (taxRate / 100).toFixed(2));
     const preTaxRate = cur_item.rate - tax;
+    cur_item.b_amount = (preTaxRate * (cur_item.qty || 1).toFixed(2));
+    
 
     cur_item.tax_rate = taxRate;
     cur_item.tax = tax;
     cur_item.pre_tax_rate = preTaxRate;
+    cur_item.b_amount = cur_item.b_amount;
     // ===========================================
 
     if (!isFreeItem && !cur_item.posa_is_offer) {
@@ -1186,6 +1191,16 @@ add_free_item(item) {
           }
           if (item.batch_no) {
             this.set_batch_qty(item, item.batch_no);
+          }
+          if (!item.tax_rate || !item.tax || !item.pre_tax_rate || !item.b_amount) {
+            const taxRate = item.rate < this.pos_profile.custom_tax_limit ? 5 : 12;
+            const tax = item.rate * (taxRate / 100); 
+            const preTaxRate = item.rate - tax;
+
+            item.tax_rate = taxRate;
+            item.tax = tax;
+            item.pre_tax_rate = preTaxRate;
+            item.b_amount = preTaxRate * (item.qty || 1);
           }
         });
       } else {
@@ -2427,6 +2442,14 @@ add_free_item(item) {
           item.base_discount_amount = item.price_list_rate;
           item.discount_percentage = 100;
         }
+        const taxRate = item.rate < this.pos_profile.custom_tax_limit ? 5 : 12;
+        const tax = item.rate * (taxRate / 100); // Note: Removed .toFixed(2) to avoid string conversion
+        const preTaxRate = item.rate - tax;
+
+        item.tax_rate = taxRate;
+        item.tax = tax;
+        item.pre_tax_rate = preTaxRate;
+        item.b_amount = preTaxRate * (item.qty || 1);
 
         // Update stock calculations and force UI update
         this.calc_stock_qty(item, item.qty);
@@ -3611,6 +3634,15 @@ ApplyBuyGetFreeOffer(offer) {
       // Calculate final amounts
       cartItem.amount = this.flt(cartItem.qty * cartItem.rate, this.currency_precision);
       cartItem.base_amount = this.flt(cartItem.qty * cartItem.base_rate, this.currency_precision);
+
+      const taxRate = cartItem.rate < this.pos_profile.custom_tax_limit ? 5 : 12;
+      const tax = cartItem.rate * (taxRate / 100);
+      const preTaxRate = cartItem.rate - tax;
+
+      cartItem.tax_rate = taxRate;
+      cartItem.tax = tax;
+      cartItem.pre_tax_rate = preTaxRate;
+      cartItem.b_amount = preTaxRate * (cartItem.qty || 1);
       
       // Mark as having an offer applied
       cartItem.posa_offer_applied = 1;
@@ -3690,6 +3722,15 @@ ApplyBuyGetFreeOffer(offer) {
         
         cartItem.amount = this.flt(cartItem.qty * cartItem.rate, this.currency_precision);
         cartItem.base_amount = this.flt(cartItem.qty * cartItem.base_rate, this.currency_precision);
+
+        const taxRate = cartItem.rate < this.pos_profile.custom_tax_limit ? 5 : 12;
+        const tax = cartItem.rate * (taxRate / 100);
+        const preTaxRate = cartItem.rate - tax;
+
+        cartItem.tax_rate = taxRate;
+        cartItem.tax = tax;
+        cartItem.pre_tax_rate = preTaxRate;
+        cartItem.b_amount = preTaxRate * (cartItem.qty || 1);
         
         this.$forceUpdate();
       }
@@ -3871,6 +3912,16 @@ ApplyBuyGetFreeOffer(offer) {
         }
       }
 
+
+      const taxRate = new_item.rate < this.pos_profile.custom_tax_limit ? 5 : 12;
+      const tax = new_item.rate * (taxRate / 100);
+      const preTaxRate = new_item.rate - tax;
+
+      new_item.tax_rate = taxRate;
+      new_item.tax = tax;
+      new_item.pre_tax_rate = preTaxRate;
+      new_item.b_amount = preTaxRate * (new_item.qty || 1);
+
       new_item.posa_row_id = this.makeid(20);
 
       if ((!this.pos_profile.posa_auto_set_batch && new_item.has_batch_no) || new_item.has_serial_no) {
@@ -3952,6 +4003,15 @@ ApplyBuyGetFreeOffer(offer) {
             // Calculate final amounts
             item.amount = this.flt(item.qty * item.rate, this.currency_precision);
             item.base_amount = this.flt(item.qty * item.base_rate, this.currency_precision);
+
+            const taxRate = item.rate < this.pos_profile.custom_tax_limit ? 5 : 12;
+            const tax = item.rate * (taxRate / 100);
+            const preTaxRate = item.rate - tax;
+
+            item.tax_rate = taxRate;
+            item.tax = tax;
+            item.pre_tax_rate = preTaxRate;
+            item.b_amount = preTaxRate * (item.qty || 1);
             
             console.log('Updated rates after applying offer:', {
               rate: item.rate,
@@ -4006,6 +4066,15 @@ ApplyBuyGetFreeOffer(offer) {
           // Recalculate amounts
           item.amount = this.flt(item.qty * item.rate, this.currency_precision);
           item.base_amount = this.flt(item.qty * item.base_rate, this.currency_precision);
+
+          const taxRate = item.rate < this.pos_profile.custom_tax_limit ? 5 : 12;
+          const tax = item.rate * (taxRate / 100);
+          const preTaxRate = item.rate - tax;
+
+          item.tax_rate = taxRate;
+          item.tax = tax;
+          item.pre_tax_rate = preTaxRate;
+          item.b_amount = preTaxRate * (item.qty || 1);
 
           // Only clear original rates if no other offers are applied
           const remaining_offers = item_offers.filter(id => id !== offer.row_id);
