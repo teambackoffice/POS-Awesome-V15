@@ -729,7 +729,7 @@ export default {
     }
 
     // === Tax Calculations ===
-    const taxRate = item.rate < this.pos_profile.custom_tax_limit ? 5 : 12;
+    const taxRate = new_item.rate < this.pos_profile.custom_tax_limit ? 5 : 12;
     let tax;
 
     if (taxRate === 5) {
@@ -737,8 +737,12 @@ export default {
     } else {
       tax = +(new_item.rate * (taxRate / 112)).toFixed(2);
     }
-
-    const preTaxRate = +(item.rate - taxRate).toFixed(2);
+    let preTaxRate;
+    if (taxRate === 5) {
+      preTaxRate = +((new_item.rate * 100)/105).toFixed(2);
+    } else {
+      preTaxRate = +((new_item.rate * 100)/105).toFixed(2);
+    }
 
     new_item.tax_rate = taxRate;
     new_item.tax = tax;
@@ -802,7 +806,12 @@ export default {
       tax = +(item.rate * (taxRate / 112)).toFixed(2);
     }
 
-    const preTaxRate = +(item.rate - taxRate).toFixed(2);
+    let preTaxRate;
+    if (taxRate === 5) {
+      preTaxRate = +((item.rate * 100)/105).toFixed(2);
+    } else {
+      preTaxRate = +((item.rate * 100)/105).toFixed(2);
+    }
 
     const bAmount = +(preTaxRate * (item.qty || 1)).toFixed(2)
 
@@ -1213,7 +1222,12 @@ add_free_item(item) {
               tax = +(item.rate * (taxRate / 112)).toFixed(2);
             }
 
-            const preTaxRate = +(item.rate - taxRate).toFixed(2);
+            let preTaxRate;
+            if (taxRate === 5) {
+              preTaxRate = +((item.rate * 100)/105).toFixed(2);
+            } else {
+              preTaxRate = +((item.rate * 100)/105).toFixed(2);
+            }
 
             const bAmount = +(preTaxRate * (item.qty || 1)).toFixed(2)
 
@@ -2470,7 +2484,12 @@ add_free_item(item) {
             tax = +(item.rate * (taxRate / 112)).toFixed(2);
           }
 
-          const preTaxRate = +(item.rate - taxRate).toFixed(2);
+          let preTaxRate;
+          if (taxRate === 5) {
+            preTaxRate = +((item.rate * 100)/105).toFixed(2);
+          } else {
+            preTaxRate = +((item.rate * 100)/105).toFixed(2);
+          }
 
           const bAmount = +(preTaxRate * (item.qty || 1)).toFixed(2)
 
@@ -3671,7 +3690,12 @@ ApplyBuyGetFreeOffer(offer) {
         tax = +(cartItem.rate * (taxRate / 112)).toFixed(2);
       }
 
-      const preTaxRate = +(cartItem.rate - taxRate).toFixed(2);
+      let preTaxRate;
+      if (taxRate === 5) {
+        preTaxRate = +((cartItem.rate * 100)/105).toFixed(2);
+      } else {
+        preTaxRate = +((cartItem.rate * 100)/105).toFixed(2);
+      }
 
       const bAmount = +(preTaxRate * (cartItem.qty || 1)).toFixed(2)
 
@@ -3767,7 +3791,12 @@ ApplyBuyGetFreeOffer(offer) {
           tax = +(cartItem.rate * (taxRate / 112)).toFixed(2);
         }
 
-        const preTaxRate = +(cartItem.rate - taxRate).toFixed(2);
+        let preTaxRate;
+        if (taxRate === 5) {
+          preTaxRate = +((cartItem.rate * 100)/105).toFixed(2);
+        } else {
+          preTaxRate = +((cartItem.rate * 100)/105).toFixed(2);
+        }
 
         const bAmount = +(preTaxRate * (cartItem.qty || 1)).toFixed(2)
 
@@ -3965,7 +3994,12 @@ ApplyBuyGetFreeOffer(offer) {
         tax = +(new_item.rate * (taxRate / 112)).toFixed(2);
       }
 
-      const preTaxRate = +(new_item.rate - taxRate).toFixed(2);
+      let preTaxRate;
+      if (taxRate === 5) {
+        preTaxRate = +((new_item.rate * 100)/105).toFixed(2);
+      } else {
+        preTaxRate = +((new_item.rate * 100)/105).toFixed(2);
+      }
 
       const bAmount = +(preTaxRate * (new_item.qty || 1)).toFixed(2)
 
@@ -4060,17 +4094,22 @@ ApplyBuyGetFreeOffer(offer) {
             let tax;
 
             if (taxRate === 5) {
-              tax = +(new_item.rate * (taxRate / 105)).toFixed(2);
+              tax = +(item.rate * (taxRate / 105)).toFixed(2);
             } else {
-              tax = +(new_item.rate * (taxRate / 112)).toFixed(2);
+              tax = +(item.rate * (taxRate / 112)).toFixed(2);
             }
 
-            const preTaxRate = +(item.rate - taxRate).toFixed(2);
+            let preTaxRate;
+            if (taxRate === 5) {
+              preTaxRate = +((item.rate * 100)/105).toFixed(2);
+            } else {
+              preTaxRate = +((item.rate * 100)/105).toFixed(2);
+            }
 
-            new_item.tax_rate = taxRate;
-            new_item.tax = tax;
-            new_item.pre_tax_rate = preTaxRate;
-            new_item.b_amount = +(preTaxRate * (new_item.qty || 1)).toFixed(2);
+            item.tax_rate = taxRate;
+            item.tax = tax;
+            item.pre_tax_rate = preTaxRate;
+            item.b_amount = +(preTaxRate * (item.qty || 1)).toFixed(2);
 
             
             console.log('Updated rates after applying offer:', {
@@ -4127,7 +4166,7 @@ ApplyBuyGetFreeOffer(offer) {
           item.amount = this.flt(item.qty * item.rate, this.currency_precision);
           item.base_amount = this.flt(item.qty * item.base_rate, this.currency_precision);
 
-          const taxRate = item.rate < this.pos_profile.custom_tax_limit ? 5 : 12;
+          const taxRate = new_item.rate < this.pos_profile.custom_tax_limit ? 5 : 12;
           let tax;
 
           if (taxRate === 5) {
@@ -4136,7 +4175,12 @@ ApplyBuyGetFreeOffer(offer) {
             tax = +(new_item.rate * (taxRate / 112)).toFixed(2);
           }
 
-          const preTaxRate = +(item.rate - taxRate).toFixed(2);
+          let preTaxRate;
+          if (taxRate === 5) {
+            preTaxRate = +((new_item.rate * 100)/105).toFixed(2);
+          } else {
+            preTaxRate = +((new_item.rate * 100)/105).toFixed(2);
+          }
 
           new_item.tax_rate = taxRate;
           new_item.tax = tax;
