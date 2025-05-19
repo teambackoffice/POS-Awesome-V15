@@ -741,7 +741,7 @@ export default {
     if (taxRate === 5) {
       preTaxRate = +((new_item.rate * 100)/105).toFixed(2);
     } else {
-      preTaxRate = +((new_item.rate * 100)/105).toFixed(2);
+      preTaxRate = +((new_item.rate * 100)/112).toFixed(2);
     }
 
     new_item.tax_rate = taxRate;
@@ -810,7 +810,7 @@ export default {
     if (taxRate === 5) {
       preTaxRate = +((item.rate * 100)/105).toFixed(2);
     } else {
-      preTaxRate = +((item.rate * 100)/105).toFixed(2);
+      preTaxRate = +((item.rate * 100)/112).toFixed(2);
     }
 
     const bAmount = +(preTaxRate * (item.qty || 1)).toFixed(2)
@@ -1226,7 +1226,7 @@ add_free_item(item) {
             if (taxRate === 5) {
               preTaxRate = +((item.rate * 100)/105).toFixed(2);
             } else {
-              preTaxRate = +((item.rate * 100)/105).toFixed(2);
+              preTaxRate = +((item.rate * 100)/112).toFixed(2);
             }
 
             const bAmount = +(preTaxRate * (item.qty || 1)).toFixed(2)
@@ -2488,7 +2488,7 @@ add_free_item(item) {
           if (taxRate === 5) {
             preTaxRate = +((item.rate * 100)/105).toFixed(2);
           } else {
-            preTaxRate = +((item.rate * 100)/105).toFixed(2);
+            preTaxRate = +((item.rate * 100)/112).toFixed(2);
           }
 
           const bAmount = +(preTaxRate * (item.qty || 1)).toFixed(2)
@@ -3694,7 +3694,7 @@ ApplyBuyGetFreeOffer(offer) {
       if (taxRate === 5) {
         preTaxRate = +((cartItem.rate * 100)/105).toFixed(2);
       } else {
-        preTaxRate = +((cartItem.rate * 100)/105).toFixed(2);
+        preTaxRate = +((cartItem.rate * 100)/112).toFixed(2);
       }
 
       const bAmount = +(preTaxRate * (cartItem.qty || 1)).toFixed(2)
@@ -3795,7 +3795,7 @@ ApplyBuyGetFreeOffer(offer) {
         if (taxRate === 5) {
           preTaxRate = +((cartItem.rate * 100)/105).toFixed(2);
         } else {
-          preTaxRate = +((cartItem.rate * 100)/105).toFixed(2);
+          preTaxRate = +((cartItem.rate * 100)/112).toFixed(2);
         }
 
         const bAmount = +(preTaxRate * (cartItem.qty || 1)).toFixed(2)
@@ -3998,7 +3998,7 @@ ApplyBuyGetFreeOffer(offer) {
       if (taxRate === 5) {
         preTaxRate = +((new_item.rate * 100)/105).toFixed(2);
       } else {
-        preTaxRate = +((new_item.rate * 100)/105).toFixed(2);
+        preTaxRate = +((new_item.rate * 100)/112).toFixed(2);
       }
 
       const bAmount = +(preTaxRate * (new_item.qty || 1)).toFixed(2)
@@ -4103,7 +4103,7 @@ ApplyBuyGetFreeOffer(offer) {
             if (taxRate === 5) {
               preTaxRate = +((item.rate * 100)/105).toFixed(2);
             } else {
-              preTaxRate = +((item.rate * 100)/105).toFixed(2);
+              preTaxRate = +((item.rate * 100)/112).toFixed(2);
             }
 
             item.tax_rate = taxRate;
@@ -4179,7 +4179,7 @@ ApplyBuyGetFreeOffer(offer) {
           if (taxRate === 5) {
             preTaxRate = +((new_item.rate * 100)/105).toFixed(2);
           } else {
-            preTaxRate = +((new_item.rate * 100)/105).toFixed(2);
+            preTaxRate = +((new_item.rate * 100)/112).toFixed(2);
           }
 
           new_item.tax_rate = taxRate;
