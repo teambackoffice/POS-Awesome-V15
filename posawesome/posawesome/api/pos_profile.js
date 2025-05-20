@@ -8,5 +8,14 @@ frappe.ui.form.on('POS Profile', {
                 filters: { 'type': 'Cash' }
             };
         });
+        frm.set_query("custom_discount_account", function () {
+            return {
+                filters: {
+                    company: frm.doc.company,
+                    is_group: 0,
+                    report_type: "Profit and Loss",
+                },
+            };
+        })
     },
 });

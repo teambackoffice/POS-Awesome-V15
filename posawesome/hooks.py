@@ -258,7 +258,8 @@ fixtures = [
                     "POS Profile-column_break_uolvm",
                     "POS Profile-posa_allow_mpesa_reconcile_payments",
                     "POS Profile-custom_tax_limit",
-                    "POS Profile-posa_allow_multi_currency"
+                    "POS Profile-posa_allow_multi_currency",
+                    "POS Profile-custom_discount_account"
                 ),
             ]
         ],

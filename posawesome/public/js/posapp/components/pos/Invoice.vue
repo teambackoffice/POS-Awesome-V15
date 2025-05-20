@@ -747,7 +747,8 @@ export default {
     new_item.tax_rate = taxRate;
     new_item.tax = tax;
     new_item.pre_tax_rate = preTaxRate;
-    new_item.b_amount = +(preTaxRate * (new_item.qty || 1)).toFixed(2);
+    new_item.b_amount = (preTaxRate * new_item.qty).toFixed(2);
+    console.log("Tax values set for item:", new_item.b_amount);
     // ========================
 
     this.items.unshift(new_item);
@@ -813,12 +814,12 @@ export default {
       preTaxRate = +((item.rate * 100)/112).toFixed(2);
     }
 
-    const bAmount = +(preTaxRate * (item.qty || 1)).toFixed(2)
-
+    let b_amount = (preTaxRate * item.qty).toFixed(2);
     item.tax_rate = taxRate;
     item.tax = tax.toFixed(2);
     item.pre_tax_rate = preTaxRate.toFixed(2);
-    item.b_amount = bAmount;
+    item.b_amount =+ b_amount;
+    console.log("Tax values set for item:", b_amount);
     // ===========================================
 
     if (!isFreeItem && !cur_item.posa_is_offer) {
@@ -1229,12 +1230,11 @@ add_free_item(item) {
               preTaxRate = +((item.rate * 100)/112).toFixed(2);
             }
 
-            const bAmount = +(preTaxRate * (item.qty || 1)).toFixed(2)
-
+          
             item.tax_rate = taxRate;
             item.tax = tax.toFixed(2);
             item.pre_tax_rate = preTaxRate.toFixed(2);
-            item.b_amount = bAmount;
+            item.b_amount = (preTaxRate * item.qty).toFixed(2);
           }
         });
       } else {
@@ -1387,6 +1387,9 @@ add_free_item(item) {
       doc.pos_profile = doc.pos_profile || this.pos_profile.name;
       doc.set_posting_time = 1;
       doc.posting_date = this.posting_date;
+      if (this.pos_profile.custom_discount_account) {
+        doc.additional_discount_account = this.pos_profile.custom_discount_account;
+      }
       
       // Currency related fields
       doc.currency = this.selected_currency || this.pos_profile.currency;
@@ -2392,6 +2395,7 @@ add_free_item(item) {
 
       const fieldId = $event.target.id;
       let newValue = flt(value, this.currency_precision);
+      this.recalculate_b_amount(item);
 
       try {
         // Handle negative values
@@ -2497,12 +2501,12 @@ add_free_item(item) {
             preTaxRate = +((item.rate * 100)/112).toFixed(2);
           }
 
-          const bAmount = +(preTaxRate * (item.qty || 1)).toFixed(2)
+          
 
           item.tax_rate = taxRate;
           item.tax = tax.toFixed(2);
           item.pre_tax_rate = preTaxRate.toFixed(2);
-          item.b_amount = bAmount;
+          item.b_amount = (preTaxRate * item.qty).toFixed(2);
 
         // Update stock calculations and force UI update
         this.calc_stock_qty(item, item.qty);
@@ -2662,6 +2666,7 @@ add_free_item(item) {
     // Calculate stock quantity for an item
     calc_stock_qty(item, value) {
       item.stock_qty = item.conversion_factor * value;
+      this.recalculate_b_amount(item);
     },
 
     // Set serial numbers for an item (and update qty)
@@ -3708,7 +3713,7 @@ ApplyBuyGetFreeOffer(offer) {
       cartItem.tax_rate = taxRate;
       cartItem.tax = tax.toFixed(2);
       cartItem.pre_tax_rate = preTaxRate.toFixed(2);
-      cartItem.b_amount = bAmount;
+      cartItem.b_amount = (preTaxRate * cartItem.qty).toFixed(2);
       
       // Mark as having an offer applied
       cartItem.posa_offer_applied = 1;
@@ -3804,12 +3809,11 @@ ApplyBuyGetFreeOffer(offer) {
           preTaxRate = +((cartItem.rate * 100)/112).toFixed(2);
         }
 
-        const bAmount = +(preTaxRate * (cartItem.qty || 1)).toFixed(2)
-
+        
         cartItem.tax_rate = taxRate;
         cartItem.tax = tax.toFixed(2);
         cartItem.pre_tax_rate = preTaxRate.toFixed(2);
-        cartItem.b_amount = bAmount;
+        cartItem.b_amount = (preTaxRate * cartItem.qty).toFixed(2);
         
         this.$forceUpdate();
       }
@@ -4007,12 +4011,12 @@ ApplyBuyGetFreeOffer(offer) {
         preTaxRate = +((new_item.rate * 100)/112).toFixed(2);
       }
 
-      const bAmount = +(preTaxRate * (new_item.qty || 1)).toFixed(2)
+      
 
       new_item.tax_rate = taxRate;
       new_item.tax = tax.toFixed(2);
       new_item.pre_tax_rate = preTaxRate.toFixed(2);
-      new_item.b_amount = bAmount;
+      new_item.b_amount = (preTaxRate * new_item.qty).toFixed(2);
 
       new_item.posa_row_id = this.makeid(20);
 
@@ -4115,7 +4119,7 @@ ApplyBuyGetFreeOffer(offer) {
             item.tax_rate = taxRate;
             item.tax = tax;
             item.pre_tax_rate = preTaxRate;
-            item.b_amount = +(preTaxRate * (item.qty || 1)).toFixed(2);
+            item.b_amount = +(preTaxRate * item.qty).toFixed(2);
 
             
             console.log('Updated rates after applying offer:', {
@@ -4191,7 +4195,7 @@ ApplyBuyGetFreeOffer(offer) {
           new_item.tax_rate = taxRate;
           new_item.tax = tax;
           new_item.pre_tax_rate = preTaxRate;
-          new_item.b_amount = +(preTaxRate * (new_item.qty || 1)).toFixed(2);
+          new_item.b_amount = +(preTaxRate * new_item.qty).toFixed(2);
 
 
           // Only clear original rates if no other offers are applied
@@ -4418,6 +4422,9 @@ ApplyBuyGetFreeOffer(offer) {
         parsedValue = -Math.abs(parsedValue);
         item[field_name] = parsedValue;
       }
+      if (field_name === 'qty') {
+          this.recalculate_b_amount(item);
+        }
 
       return parsedValue;
     },
@@ -4715,7 +4722,19 @@ ApplyBuyGetFreeOffer(offer) {
       
       this.update_item_rates();
     },
-
+    recalculate_b_amount(item) {
+      if (item && item.pre_tax_rate) {
+        // Make sure to parse the pre_tax_rate as a float to avoid string concatenation
+        const preTaxRate = parseFloat(item.pre_tax_rate);
+        const qty = parseFloat(item.qty || 0);
+        
+        // Calculate b_amount and ensure it's stored as a fixed decimal string
+        item.b_amount = (preTaxRate * qty).toFixed(2);
+        
+        // Log for debugging
+        console.log(`Recalculated b_amount for ${item.item_code}: ${item.b_amount} (${preTaxRate} * ${qty})`);
+      }
+    },
     // Add new rounding function
     roundAmount(amount) {
       // If multi-currency is enabled and selected currency is different from base currency
@@ -4727,7 +4746,7 @@ ApplyBuyGetFreeOffer(offer) {
       // For base currency or when multi-currency is disabled, round to nearest integer
       return Math.round(amount);
     },
-
+   
     // Increase quantity of an item (handles return logic)
     add_one(item) {
       // For returns, we need to add (make more negative)
@@ -4740,6 +4759,7 @@ ApplyBuyGetFreeOffer(offer) {
         this.remove_item(item);
       }
       this.calc_stock_qty(item, item.qty);
+      this.recalculate_b_amount(item);
       this.$forceUpdate();
     },
 
@@ -4755,6 +4775,7 @@ ApplyBuyGetFreeOffer(offer) {
         this.remove_item(item);
       }
       this.calc_stock_qty(item, item.qty);
+      this.recalculate_b_amount(item);
       this.$forceUpdate();
     },
   },
