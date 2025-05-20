@@ -1385,6 +1385,8 @@ add_free_item(item) {
       doc.ignore_pricing_rule = 1;
       doc.company = doc.company || this.pos_profile.company;
       doc.pos_profile = doc.pos_profile || this.pos_profile.name;
+      doc.set_posting_time = 1;
+      doc.posting_date = this.posting_date;
       
       // Currency related fields
       doc.currency = this.selected_currency || this.pos_profile.currency;
@@ -1793,6 +1795,7 @@ add_free_item(item) {
       const doc = this.get_invoice_doc();
       if (doc.name) {
         try {
+          doc.posting_date = this.posting_date;
           const updated_doc = this.update_invoice(doc);
           // Update posting date after invoice update
           if (updated_doc && updated_doc.posting_date) {
@@ -1809,6 +1812,7 @@ add_free_item(item) {
         }
       } else {
         try {
+          doc.posting_date = this.posting_date;
           const updated_doc = this.update_invoice(doc);
           // Update posting date after invoice creation
           if (updated_doc && updated_doc.posting_date) {
