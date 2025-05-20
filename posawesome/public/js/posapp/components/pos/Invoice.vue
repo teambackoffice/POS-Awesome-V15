@@ -2422,6 +2422,8 @@ add_free_item(item) {
             // Calculate percentage based on converted values
             if (converted_price_list_rate) {
               item.discount_percentage = this.flt((item.discount_amount / converted_price_list_rate) * 100, this.float_precision);
+            } else {
+              item.discount_percentage = 0; // Avoid division by zero
             }
             break;
 

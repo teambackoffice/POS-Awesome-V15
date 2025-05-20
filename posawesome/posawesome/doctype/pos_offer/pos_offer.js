@@ -10,6 +10,14 @@ frappe.ui.form.on('POS Offer', {
 		controllers(frm);
 	},
 	onload: function (frm) {
+		const field = frm.fields_dict['apply_on'];
+		if (field && field.df.options) {
+			const hideOptions = new Set(['Item Group', 'Brand', 'Transaction']);
+			field.df.options = field.df.options.split('\n')
+			.filter(opt => !hideOptions.has(opt))
+			.join('\n');
+			field.refresh();
+		}
 		set_filters(frm);
 		controllers(frm);
 	},

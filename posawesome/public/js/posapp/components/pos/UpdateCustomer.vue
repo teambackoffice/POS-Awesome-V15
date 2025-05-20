@@ -148,8 +148,8 @@ export default {
     tax_id: '',
     mobile_no: '',
     address_line1: '',
-    city: '',
-    country: 'Pakistan',
+    city: 'Calicut',
+    country: 'India',
     email_id: '',
     referral_code: '',
     birthday: '',
@@ -302,8 +302,8 @@ export default {
       this.tax_id = '';
       this.mobile_no = '';
       this.address_line1 = '';
-      this.city = '';
-      this.country = 'Pakistan';
+      this.city = 'Calicut';
+      this.country = 'India';
       this.email_id = '';
       this.referral_code = '';
       this.birthday = '';
