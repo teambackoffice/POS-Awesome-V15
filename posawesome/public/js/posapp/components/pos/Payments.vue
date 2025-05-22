@@ -433,12 +433,12 @@
               class="my-0 py-0"
             ></v-switch>
           </v-col>
-          <v-col cols="6" v-if="pos_profile.posa_allow_credit_sale && !invoice_doc.is_return">
-            <v-switch
-              v-model="is_credit_sale"
-              :label="frappe._('Credit Sale?')"
-            ></v-switch>
-          </v-col>
+          <v-col cols="6" v-if="pos_profile.posa_allow_credit_sale">
+          <v-switch
+            v-model="is_credit_sale"
+            :label="invoice_doc.is_return ? frappe._('Credit Return?') : frappe._('Credit Sale?')"
+          ></v-switch>
+        </v-col>
           <v-col cols="6" v-if="invoice_doc.is_return && pos_profile.use_cashback">
             <v-switch
               v-model="is_cashback"
@@ -473,6 +473,27 @@
               ></v-date-picker>
             </v-menu>
           </v-col>
+          <v-col cols="6" v-if="invoice_doc">
+          <v-switch
+            v-model="is_redeem"
+            :label="frappe._('Redeem')"
+          ></v-switch>
+        </v-col>
+
+      <v-col cols="6" v-if="invoice_doc && is_redeem">
+      <v-text-field
+        density="compact"
+        variant="outlined"
+        color="primary"
+        :label="frappe._('Available Return Amount')"
+        bg-color="white"
+        hide-details
+        :value="formatCurrency(total_customer_return_amount, invoice_doc.currency)"
+        readonly
+        :prefix="currencySymbol(invoice_doc.currency)"
+      ></v-text-field>
+    </v-col>
+    
           <v-col cols="6" v-if="!invoice_doc.is_return && pos_profile.use_customer_credit">
             <v-switch
               v-model="redeem_customer_credit"
@@ -622,6 +643,7 @@ export default {
       is_credit_sale: false, // Is this a credit sale?
       is_write_off_change: false, // Write-off for change enabled
       is_cashback: true, // Cashback enabled
+      is_redeem: false, // Redeem enabled
       redeem_customer_credit: false, // Redeem customer credit?
       customer_credit_dict: [], // List of available customer credits
       paid_change_rules: [], // Validation rules for paid change
@@ -638,9 +660,23 @@ export default {
       sales_person: "", // Selected sales person
       addresses: [], // List of customer addresses
       is_user_editing_paid_change: false, // User interaction flag
+      customer_return_amount: 0, // Total return invoice amount for customer
+      customer_return_invoices: [],
+      originalPaymentAmounts: null, 
     };
   },
   computed: {
+    total_customer_return_amount() {
+      if (!this.customer_return_invoices || this.customer_return_invoices.length === 0) {
+        return 0;
+      }
+      
+      return this.customer_return_invoices.reduce((total, invoice) => {
+        // Sum up unpaid return invoice amounts (negative amounts)
+        return total + Math.abs(this.flt(invoice.outstanding_amount) || 0);
+      }, 0);
+    },
+  
     // Get currency symbol for given or current currency
     currencySymbol() {
       return (currency) => {
@@ -651,40 +687,69 @@ export default {
     displayCurrency() {
       return this.invoice_doc ? this.invoice_doc.currency : '';
     },
+    base_total_payments() {
+    let total = 0;
+    if (this.invoice_doc && this.invoice_doc.payments) {
+      this.invoice_doc.payments.forEach((payment) => {
+        // Payment amount is already in selected currency
+        total += parseFloat(payment.amount) || 0;
+      });
+    }
+    
+    // Add loyalty amount (convert if needed)
+    if (this.loyalty_amount) {
+      // Loyalty points are stored in base currency (PKR)
+      if (this.invoice_doc.currency !== this.pos_profile.currency) {
+        // Convert to selected currency (e.g. USD) by dividing
+        total += this.flt(this.loyalty_amount / (this.invoice_doc.conversion_rate || 1), this.currency_precision);
+      } else {
+        total += parseFloat(this.loyalty_amount) || 0;
+      }
+    }
+    
+    // Add redeemed customer credit (convert if needed)
+    if (this.redeemed_customer_credit) {
+      // Customer credit is stored in base currency (PKR)
+      if (this.invoice_doc.currency !== this.pos_profile.currency) {
+        // Convert to selected currency (e.g. USD) by dividing
+        total += this.flt(this.redeemed_customer_credit / (this.invoice_doc.conversion_rate || 1), this.currency_precision);
+      } else {
+        total += parseFloat(this.redeemed_customer_credit) || 0;
+      }
+    }
+    
+    return this.flt(total, this.currency_precision);
+  },
+  
     // Calculate total payments (all methods, loyalty, credit)
     total_payments() {
-      let total = 0;
-      if (this.invoice_doc && this.invoice_doc.payments) {
-        this.invoice_doc.payments.forEach((payment) => {
-          // Payment amount is already in selected currency
-          total += parseFloat(payment.amount) || 0;
-        });
+    let total = 0;
+    if (this.invoice_doc && this.invoice_doc.payments) {
+      this.invoice_doc.payments.forEach((payment) => {
+        total += parseFloat(payment.amount) || 0;
+      });
+    }
+    
+    // Add loyalty amount
+    if (this.loyalty_amount) {
+      if (this.invoice_doc.currency !== this.pos_profile.currency) {
+        total += this.flt(this.loyalty_amount / (this.invoice_doc.conversion_rate || 1), this.currency_precision);
+      } else {
+        total += parseFloat(this.loyalty_amount) || 0;
       }
-      
-      // Add loyalty amount (convert if needed)
-      if (this.loyalty_amount) {
-        // Loyalty points are stored in base currency (PKR)
-        if (this.invoice_doc.currency !== this.pos_profile.currency) {
-          // Convert to selected currency (e.g. USD) by dividing
-          total += this.flt(this.loyalty_amount / (this.invoice_doc.conversion_rate || 1), this.currency_precision);
-        } else {
-          total += parseFloat(this.loyalty_amount) || 0;
-        }
+    }
+    
+    // Add redeemed customer credit
+    if (this.redeemed_customer_credit) {
+      if (this.invoice_doc.currency !== this.pos_profile.currency) {
+        total += this.flt(this.redeemed_customer_credit / (this.invoice_doc.conversion_rate || 1), this.currency_precision);
+      } else {
+        total += parseFloat(this.redeemed_customer_credit) || 0;
       }
-      
-      // Add redeemed customer credit (convert if needed)
-      if (this.redeemed_customer_credit) {
-        // Customer credit is stored in base currency (PKR)
-        if (this.invoice_doc.currency !== this.pos_profile.currency) {
-          // Convert to selected currency (e.g. USD) by dividing
-          total += this.flt(this.redeemed_customer_credit / (this.invoice_doc.conversion_rate || 1), this.currency_precision);
-        } else {
-          total += parseFloat(this.redeemed_customer_credit) || 0;
-        }
-      }
-      
-      return this.flt(total, this.currency_precision);
-    },
+    }
+    
+    return this.flt(total, this.currency_precision);
+  },
     
     // Calculate difference between invoice total and payments
     diff_payment() {
@@ -734,8 +799,10 @@ export default {
     },
     // Display formatted total payments
     total_payments_display() {
-      return this.formatCurrency(this.total_payments, this.displayCurrency);
-    },
+    return this.formatCurrency(this.total_payments, this.displayCurrency);
+  },
+
+      
     // Display formatted difference payment
     diff_payment_display() {
       return this.formatCurrency(this.diff_payment, this.displayCurrency);
@@ -776,6 +843,43 @@ export default {
     },
   },
   watch: {
+    customer_return_invoices(newVal) {
+    if (this.is_redeem && newVal && newVal.length > 0) {
+      this.$nextTick(() => {
+        this.storeOriginalPaymentAmounts();
+        this.applyReturnCalculationToPayments();
+      });
+    }
+  },
+  total_customer_return_amount(newVal, oldVal) {
+    if (this.is_redeem && newVal !== oldVal && newVal > 0) {
+      this.$nextTick(() => {
+        this.applyReturnCalculationToPayments();
+      });
+    }
+  },
+
+    is_redeem(newVal) {
+      this.onRedeemToggle();
+    },
+    'invoice_doc.customer'(newCustomer) {
+      if (this.is_redeem && newCustomer) {
+        this.get_customer_return_invoices();
+      } else {
+        this.customer_return_invoices = [];
+        this.customer_return_amount = 0;
+      }
+    },
+    redeem_return_amount(newVal) {
+    if (newVal > this.total_customer_return_amount) {
+      this.redeem_return_amount = this.total_customer_return_amount;
+      this.eventBus.emit("show_message", {
+        title: `Cannot redeem more than available return amount: ${this.formatCurrency(this.total_customer_return_amount)}`,
+        color: "error",
+      });
+    }
+  },
+
     // Watch diff_payment to update paid_change
     diff_payment(newVal) {
       if (!this.is_user_editing_paid_change) {
@@ -838,24 +942,178 @@ export default {
     },
     // Watch is_credit_sale to reset cash payments
     is_credit_sale(newVal) {
-      if (newVal) {
-        // If credit sale is enabled, set cash payment to 0
+    if (newVal) {
+      // Reset all payments for credit sales/returns
+      this.invoice_doc.payments.forEach((payment) => {
+        payment.amount = 0;
+        if (payment.base_amount !== undefined) {
+          payment.base_amount = 0;
+        }
+      });
+    } else {
+      // Restore appropriate payment amounts when credit sale is disabled
+      const defaultPayment = this.invoice_doc.payments.find(p => p.default === 1);
+      if (defaultPayment) {
+        const amount = this.invoice_doc.rounded_total || this.invoice_doc.grand_total;
+        
+        if (this.invoice_doc.is_return) {
+          // For returns, set negative amount
+          defaultPayment.amount = -Math.abs(amount);
+          if (defaultPayment.base_amount !== undefined) {
+            defaultPayment.base_amount = -Math.abs(amount);
+          }
+        } else {
+          // For regular sales, set positive amount
+          defaultPayment.amount = amount;
+          if (defaultPayment.base_amount !== undefined) {
+            defaultPayment.base_amount = amount;
+          }
+        }
+      }
+    }
+  }
+},
+  methods: {
+    applyReturnCalculationToPayments() {
+    if (!this.invoice_doc || !this.invoice_doc.payments) return;
+    
+    // Get the base payment total (before return calculation)
+    const baseTotal = this.getBaseTotalPayments();
+    
+    if (this.is_redeem && this.total_customer_return_amount > 0 && baseTotal > 0) {
+      const calculatedAmount = baseTotal - this.total_customer_return_amount;
+      
+      // Only apply if result is positive
+      if (calculatedAmount > 0) {
+        // Calculate the reduction ratio
+        const reductionRatio = calculatedAmount / baseTotal;
+        
+        // Apply the ratio to all payment methods that have amounts
         this.invoice_doc.payments.forEach((payment) => {
-          if (payment.mode_of_payment.toLowerCase() === 'cash') {
-            payment.amount = 0;
+          if (payment.amount > 0) {
+            const originalAmount = payment.amount;
+            const newAmount = this.flt(originalAmount * reductionRatio, this.currency_precision);
+            
+            payment.amount = newAmount;
+            if (payment.base_amount !== undefined) {
+              payment.base_amount = newAmount;
+            }
+            
+            console.log(`Updated ${payment.mode_of_payment}: ${originalAmount} -> ${newAmount}`);
           }
         });
-      } else {
-        // If credit sale is disabled, set cash payment to invoice total
-        this.invoice_doc.payments.forEach((payment) => {
-          if (payment.mode_of_payment.toLowerCase() === 'cash') {
-            payment.amount = this.invoice_doc.rounded_total || this.invoice_doc.grand_total;
-          }
-        });
+        
+        this.$forceUpdate();
+      }
+    }
+  },
+  restoreOriginalPaymentAmounts() {
+    if (!this.invoice_doc || !this.invoice_doc.payments) return;
+    
+    // Store original amounts when first setting payments
+    if (!this.originalPaymentAmounts) {
+      this.originalPaymentAmounts = {};
+      this.invoice_doc.payments.forEach((payment) => {
+        this.originalPaymentAmounts[payment.mode_of_payment] = payment.amount;
+      });
+    }
+    
+    // Restore original amounts
+    this.invoice_doc.payments.forEach((payment) => {
+      if (this.originalPaymentAmounts[payment.mode_of_payment] !== undefined) {
+        payment.amount = this.originalPaymentAmounts[payment.mode_of_payment];
+        if (payment.base_amount !== undefined) {
+          payment.base_amount = this.originalPaymentAmounts[payment.mode_of_payment];
+        }
+      }
+    });
+    
+    this.$forceUpdate();
+  },
+    storeOriginalPaymentAmounts() {
+      if (!this.originalPaymentAmounts) {
+        this.originalPaymentAmounts = {};
+        if (this.invoice_doc && this.invoice_doc.payments) {
+          this.invoice_doc.payments.forEach((payment) => {
+            this.originalPaymentAmounts[payment.mode_of_payment] = payment.amount;
+          });
+        }
       }
     },
+    getBaseTotalPayments() {
+    let total = 0;
+    if (this.invoice_doc && this.invoice_doc.payments) {
+      this.invoice_doc.payments.forEach((payment) => {
+        total += parseFloat(payment.amount) || 0;
+      });
+    }
+    
+    // Add loyalty amount
+    if (this.loyalty_amount) {
+      if (this.invoice_doc.currency !== this.pos_profile.currency) {
+        total += this.flt(this.loyalty_amount / (this.invoice_doc.conversion_rate || 1), this.currency_precision);
+      } else {
+        total += parseFloat(this.loyalty_amount) || 0;
+      }
+    }
+    
+    // Add redeemed customer credit
+    if (this.redeemed_customer_credit) {
+      if (this.invoice_doc.currency !== this.pos_profile.currency) {
+        total += this.flt(this.redeemed_customer_credit / (this.invoice_doc.conversion_rate || 1), this.currency_precision);
+      } else {
+        total += parseFloat(this.redeemed_customer_credit) || 0;
+      }
+    }
+    
+    return this.flt(total, this.currency_precision);
   },
-  methods: {
+  
+  
+    get_customer_return_invoices() {
+      if (!this.invoice_doc || !this.invoice_doc.customer) {
+        this.customer_return_invoices = [];
+        this.customer_return_amount = 0;
+        return;
+      }
+      
+      const vm = this;
+      frappe.call({
+        method: "posawesome.posawesome.api.posapp.get_customer_return_invoices",
+        args: { 
+          customer: vm.invoice_doc.customer,
+          company: vm.pos_profile.company 
+        },
+        async: true,
+        callback: function (r) {
+          if (!r.exc && r.message) {
+            vm.customer_return_invoices = r.message;
+            vm.customer_return_amount = vm.total_customer_return_amount;
+          } else {
+            vm.customer_return_invoices = [];
+            vm.customer_return_amount = 0;
+          }
+        },
+      });
+    },
+    onRedeemToggle() {
+    if (this.is_redeem) {
+      this.get_customer_return_invoices();
+      // Wait for return invoices to load, then apply calculation
+      this.$nextTick(() => {
+        setTimeout(() => {
+          this.storeOriginalPaymentAmounts();
+          this.applyReturnCalculationToPayments();
+        }, 100);
+      });
+    } else {
+      this.customer_return_invoices = [];
+      this.customer_return_amount = 0;
+      // Restore original payment amounts
+      this.restoreOriginalPaymentAmounts();
+    }
+  },
+  
     // Go back to invoice view and reset customer readonly
     back_to_invoice() {
       this.eventBus.emit("show_payment", "false");
@@ -919,6 +1177,17 @@ export default {
         frappe.utils.play_sound("error");
         return;
       }
+      if (!this.is_credit_sale && this.invoice_doc.is_return && 
+        this.total_payments >= 0 && 
+        (this.invoice_doc.rounded_total || this.invoice_doc.grand_total) < 0) {
+      this.eventBus.emit("show_message", {
+        title: `Please enter refund payment amount for return`,
+        color: "error",
+      });
+      frappe.utils.play_sound("error");
+      return;
+    }
+      
       // Validate cash payments when credit sale is off
       if (!this.is_credit_sale && !this.invoice_doc.is_return) {
         let has_cash_payment = false;
@@ -1024,7 +1293,35 @@ export default {
     // Submit invoice to backend after all validations
     submit_invoice(print) {
       // For return invoices, ensure payments are negative one last time
-      if (this.invoice_doc.is_return) {
+      if (this.is_credit_sale) {
+        this.invoice_doc.is_pos = 0;  // Not a POS transaction
+        this.invoice_doc.payments = []; // Clear all payments
+        
+        // Set due date if not already set
+        if (!this.invoice_doc.due_date) {
+          this.invoice_doc.due_date = frappe.datetime.add_days(
+            this.invoice_doc.posting_date, 30
+          );
+        }
+        if (this.is_redeem && this.redeem_return_amount > 0) {
+          // Add return amount as a payment entry
+          this.invoice_doc.return_amount_redeemed = this.redeem_return_amount;
+          
+          // Optionally add it as a payment method
+          const returnPayment = this.invoice_doc.payments.find(p => p.mode_of_payment === 'Return Credit');
+          if (returnPayment) {
+            returnPayment.amount = this.redeem_return_amount;
+          }
+        }
+        if (this.invoice_doc.is_return) {
+          console.log('Processing credit return - customer will pay back later');
+        } else {
+          console.log('Processing credit sale - customer will pay later');
+        }
+      }
+      
+      // For non-credit return invoices, ensure payments are negative
+      if (this.invoice_doc.is_return && !this.is_credit_sale) {
         this.ensureReturnPaymentsAreNegative();
       }
       let totalPayedAmount = 0;
@@ -1047,6 +1344,8 @@ export default {
         redeemed_customer_credit: this.redeemed_customer_credit,
         customer_credit_dict: this.customer_credit_dict,
         is_cashback: this.is_cashback,
+        redeem_return_amount: this.redeem_return_amount,
+        customer_return_invoices: this.customer_return_invoices,
       };
       const vm = this;
       frappe.call({
@@ -1115,45 +1414,56 @@ export default {
       });
     },
     // Set full amount for a payment method (or negative for returns)
-    set_full_amount(idx) {
-      const isReturn = this.invoice_doc.is_return || this.invoiceType === "Return";
-      let totalAmount = this.invoice_doc.rounded_total || this.invoice_doc.grand_total;
-      
-      console.log('Setting full amount for payment method idx:', idx);
-      console.log('Current payments:', JSON.stringify(this.invoice_doc.payments));
+    // Update your set_full_amount method:
+set_full_amount(idx) {
+  const isReturn = this.invoice_doc.is_return || this.invoiceType === "Return";
+  let totalAmount = this.invoice_doc.rounded_total || this.invoice_doc.grand_total;
+  
+  console.log('Setting full amount for payment method idx:', idx);
 
-      // Reset all payment amounts first
-      this.invoice_doc.payments.forEach(payment => {
-        payment.amount = 0;
-        if (payment.base_amount !== undefined) {
-          payment.base_amount = 0;
-        }
-      });
+  // Reset all payment amounts first
+  this.invoice_doc.payments.forEach(payment => {
+    payment.amount = 0;
+    if (payment.base_amount !== undefined) {
+      payment.base_amount = 0;
+    }
+  });
 
-      // Get the clicked payment method's name from the button text
-      const clickedButton = event?.target?.textContent?.trim();
-      console.log('Clicked button text:', clickedButton);
+  // Get the clicked payment method's name from the button text
+  const clickedButton = event?.target?.textContent?.trim();
+  console.log('Clicked button text:', clickedButton);
 
-      // Set amount only for clicked payment method
-      const clickedPayment = this.invoice_doc.payments.find(payment => 
-        payment.mode_of_payment === clickedButton
-      );
+  // Set amount only for clicked payment method
+  const clickedPayment = this.invoice_doc.payments.find(payment => 
+    payment.mode_of_payment === clickedButton
+  );
 
-      if (clickedPayment) {
-        console.log('Found clicked payment:', clickedPayment.mode_of_payment);
-        let amount = isReturn ? -Math.abs(totalAmount) : totalAmount;
-        clickedPayment.amount = amount;
-        if (clickedPayment.base_amount !== undefined) {
-          clickedPayment.base_amount = isReturn ? -Math.abs(amount) : amount;
-        }
-        console.log('Set amount for payment:', clickedPayment.mode_of_payment, 'amount:', amount);
-      } else {
-        console.log('No payment found for button text:', clickedButton);
-      }
+  if (clickedPayment) {
+    console.log('Found clicked payment:', clickedPayment.mode_of_payment);
+    let amount = isReturn ? -Math.abs(totalAmount) : totalAmount;
+    clickedPayment.amount = amount;
+    if (clickedPayment.base_amount !== undefined) {
+      clickedPayment.base_amount = isReturn ? -Math.abs(amount) : amount;
+    }
+    console.log('Set amount for payment:', clickedPayment.mode_of_payment, 'amount:', amount);
+  }
 
-      // Force Vue to update the view
-      this.$forceUpdate();
-    },
+  // Clear stored original amounts since we're setting new amounts
+  this.originalPaymentAmounts = null;
+  
+  // Store new amounts as original
+  this.storeOriginalPaymentAmounts();
+  
+  // Apply return calculation if redeem is enabled
+  if (this.is_redeem && this.total_customer_return_amount > 0) {
+    this.$nextTick(() => {
+      this.applyReturnCalculationToPayments();
+    });
+  }
+
+  // Force Vue to update the view
+  this.$forceUpdate();
+},
     // Set remaining amount for a payment method when focused
     set_rest_amount(idx) {
       const isReturn = this.invoice_doc.is_return || this.invoiceType === "Return";
@@ -1467,11 +1777,52 @@ export default {
     },
     // Show paid amount info message
     showPaidAmount() {
-      this.eventBus.emit("show_message", {
-        title: `Total Paid Amount: ${this.formatCurrency(this.total_payments)}`,
-        color: "info",
+  let message = `Paid Amount Details:\n`;
+  
+  if (this.is_redeem && this.total_customer_return_amount > 0 && this.originalPaymentAmounts) {
+    // Calculate original total from stored amounts
+    let originalTotal = 0;
+    Object.values(this.originalPaymentAmounts).forEach(amount => {
+      originalTotal += parseFloat(amount) || 0;
+    });
+    
+    const currentTotal = this.total_payments;
+    const returnAmount = this.total_customer_return_amount;
+    const calculatedAmount = originalTotal - returnAmount;
+    
+    message += `Original Paid Amount: ${this.formatCurrency(originalTotal)}\n`;
+    message += `(-) Return Amount: ${this.formatCurrency(returnAmount)}\n`;
+    message += `Calculation: ${this.formatCurrency(originalTotal)} - ${this.formatCurrency(returnAmount)} = ${this.formatCurrency(calculatedAmount)}\n`;
+    
+    if (calculatedAmount > 0) {
+      message += `✓ Applied - Payment methods adjusted\n`;
+      message += `Current Paid Amount: ${this.formatCurrency(currentTotal)}`;
+      
+      // Show individual payment method changes
+      message += `\n\nPayment Method Changes:`;
+      this.invoice_doc.payments.forEach(payment => {
+        const original = this.originalPaymentAmounts[payment.mode_of_payment] || 0;
+        const current = payment.amount || 0;
+        if (original > 0 || current > 0) {
+          message += `\n${payment.mode_of_payment}: ${this.formatCurrency(original)} → ${this.formatCurrency(current)}`;
+        }
       });
-    },
+    } else {
+      message += `⚠ Calculation ignored (result ≤ 0)\n`;
+      message += `Payment methods unchanged`;
+    }
+  } else {
+    message += `Total Paid Amount: ${this.formatCurrency(this.total_payments)}`;
+  }
+  
+  this.eventBus.emit("show_message", {
+    title: message,
+    color: "info",
+  });
+},
+    getBasePaidAmount() {
+    return this.base_total_payments;
+  },
     // Show diff payment info message
     showDiffPayment() {
       if (!this.invoice_doc) return;
@@ -1515,43 +1866,56 @@ export default {
   mounted() {
     this.$nextTick(() => {
       // Listen to various event bus events for POS actions
-      this.eventBus.on("send_invoice_doc_payment", (invoice_doc) => {
-        this.invoice_doc = invoice_doc;
-        const default_payment = this.invoice_doc.payments.find(
-          (payment) => payment.default === 1
-        );
-        this.is_credit_sale = false;
-        this.is_write_off_change = false;
-        if (invoice_doc.is_return) {
-          this.is_return = true;
-          // Reset all payment amounts to zero for returns
-          invoice_doc.payments.forEach((payment) => {
-            payment.amount = 0;
-            payment.base_amount = 0;
-          });
-          // Set default payment to negative amount for returns
-          if (default_payment) {
-            const amount = invoice_doc.rounded_total || invoice_doc.grand_total;
-            default_payment.amount = -Math.abs(amount);
-            if (default_payment.base_amount !== undefined) {
-              default_payment.base_amount = -Math.abs(amount);
-            }
+      // Update your mounted event handler:
+    this.eventBus.on("send_invoice_doc_payment", (invoice_doc) => {
+      this.invoice_doc = invoice_doc;
+      
+      // Reset original payment amounts for new invoice
+      this.originalPaymentAmounts = null;
+      
+      const default_payment = this.invoice_doc.payments.find(
+        (payment) => payment.default === 1
+      );
+      this.is_credit_sale = false;
+      this.is_write_off_change = false;
+      this.is_redeem = false; // Reset redeem state for new invoice
+      
+      if (invoice_doc.is_return) {
+        this.is_return = true;
+        // Reset all payment amounts to zero for returns
+        invoice_doc.payments.forEach((payment) => {
+          payment.amount = 0;
+          payment.base_amount = 0;
+        });
+        // Set default payment to negative amount for returns
+        if (default_payment) {
+          const amount = invoice_doc.rounded_total || invoice_doc.grand_total;
+          default_payment.amount = -Math.abs(amount);
+          if (default_payment.base_amount !== undefined) {
+            default_payment.base_amount = -Math.abs(amount);
           }
-        } else if (default_payment) {
-          // For regular invoices, set positive amount
-          default_payment.amount = this.flt(
-            invoice_doc.rounded_total || invoice_doc.grand_total,
-            this.currency_precision
-          );
         }
-        this.loyalty_amount = 0;
-        this.redeemed_customer_credit = 0;
-        // Only get addresses if customer exists
-        if (invoice_doc.customer) {
-          this.get_addresses();
-        }
-        this.get_sales_person_names();
+      } else if (default_payment) {
+        // For regular invoices, set positive amount
+        default_payment.amount = this.flt(
+          invoice_doc.rounded_total || invoice_doc.grand_total,
+          this.currency_precision
+        );
+      }
+      
+      // Store initial payment amounts
+      this.$nextTick(() => {
+        this.storeOriginalPaymentAmounts();
       });
+      
+      this.loyalty_amount = 0;
+      this.redeemed_customer_credit = 0;
+      // Only get addresses if customer exists
+      if (invoice_doc.customer) {
+        this.get_addresses();
+      }
+      this.get_sales_person_names();
+    });
       this.eventBus.on("register_pos_profile", (data) => {
         this.pos_profile = data.pos_profile;
         this.get_mpesa_modes();
@@ -1579,6 +1943,9 @@ export default {
           this.customer_credit_dict = [];
           this.redeem_customer_credit = false;
           this.is_cashback = true;
+          this.customer_return_invoices = [];
+          this.customer_return_amount = 0;
+          this.is_redeem = false;
         }
       });
       this.eventBus.on("set_pos_settings", (data) => {

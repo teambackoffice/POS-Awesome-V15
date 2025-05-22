@@ -943,6 +943,48 @@ def get_available_credit(customer, company):
 
     return total_credit
 
+@frappe.whitelist()
+def get_customer_return_invoices(customer, company):
+    """Get all return invoices for a customer with outstanding amounts"""
+    
+    if not customer or not company:
+        return []
+    
+    try:
+        return_invoices = frappe.db.sql("""
+            SELECT 
+                name,
+                posting_date,
+                grand_total,
+                outstanding_amount,
+                currency,
+                rounded_total
+            FROM `tabSales Invoice`
+            WHERE 
+                customer = %(customer)s 
+                AND company = %(company)s 
+                AND is_return = 1 
+                AND docstatus = 1
+                AND outstanding_amount < 0
+                AND ABS(outstanding_amount) > 0.01
+            ORDER BY posting_date DESC
+        """, {
+            'customer': customer,
+            'company': company
+        }, as_dict=True)
+        
+        # Convert amounts to positive for display
+        for invoice in return_invoices:
+            invoice['outstanding_amount'] = abs(invoice['outstanding_amount'])
+            invoice['grand_total'] = abs(invoice['grand_total'])
+            if invoice.get('rounded_total'):
+                invoice['rounded_total'] = abs(invoice['rounded_total'])
+        
+        return return_invoices
+        
+    except Exception as e:
+        frappe.log_error(f"Error fetching customer return invoices: {str(e)}")
+        return []
 
 @frappe.whitelist()
 def get_draft_invoices(pos_opening_shift):
