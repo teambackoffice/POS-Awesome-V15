@@ -148,7 +148,7 @@ export default {
     tax_id: '',
     mobile_no: '',
     address_line1: '',
-    city: 'Calicut',
+    city: '',
     country: 'India',
     email_id: '',
     referral_code: '',
@@ -302,7 +302,7 @@ export default {
       this.tax_id = '';
       this.mobile_no = '';
       this.address_line1 = '';
-      this.city = 'Calicut';
+      this.city = '';
       this.country = 'India';
       this.email_id = '';
       this.referral_code = '';

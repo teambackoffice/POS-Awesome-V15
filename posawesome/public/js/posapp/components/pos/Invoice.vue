@@ -1175,110 +1175,195 @@ add_free_item(item) {
     },
 
     // Load an invoice (or return invoice) from data, set all fields accordingly
-    async load_invoice(data = {}) {
-      console.log("load_invoice called with data:", {
-        is_return: data.is_return,
-        return_against: data.return_against,
-        customer: data.customer,
-        items_count: data.items ? data.items.length : 0
-      });
+async load_invoice(data = {}) {
+  console.log("=== TROUBLESHOOTING RETURN DISCOUNT ===");
+  console.log("Raw data received:", data);
+  
+  this.clear_invoice()
+  
+  if (data.is_return) {
+    console.log("Processing return invoice");
+    
+    // IMMEDIATE FIX: Check if discount data is missing and try alternative field names
+    console.log("Checking for discount data in various fields:");
+    console.log("data.discount_amount:", data.discount_amount);
+    console.log("data.additional_discount_percentage:", data.additional_discount_percentage);
+    console.log("data.additional_discount:", data.additional_discount);
+    console.log("data.base_discount_amount:", data.base_discount_amount);
+    console.log("data.grand_total:", data.grand_total);
+    console.log("data.total:", data.total);
+    
+    if (data.return_against) {
+      console.log("Return has reference to invoice:", data.return_against);
+      this.eventBus.emit("set_customer_readonly", true);
       
-      this.clear_invoice()
-      if (data.is_return) {
-        console.log("Processing return invoice");
-        // For return without invoice case, check if there's a return_against
-        // Only set customer readonly if this is a return with reference to an invoice
-        if (data.return_against) {
-          console.log("Return has reference to invoice:", data.return_against);
-          this.eventBus.emit("set_customer_readonly", true);
-        } else {
-          console.log("Return without invoice reference, customer can be selected");
-          // Allow customer selection for returns without invoice
-          this.eventBus.emit("set_customer_readonly", false);
-        }
-        this.invoiceType = "Return";
-        this.invoiceTypes = ["Return"];
-      }
-      
-      this.invoice_doc = data;
-      this.items = data.items || [];
-      console.log("Items set:", this.items.length, "items");
-      
-      if (this.items.length > 0) {
-        this.update_items_details(this.items);
-        this.posa_offers = data.posa_offers || [];
-        this.items.forEach((item) => {
-          if (!item.posa_row_id) {
-            item.posa_row_id = this.makeid(20);
-          }
-          if (item.batch_no) {
-            this.set_batch_qty(item, item.batch_no);
-          }
-          if (!item.tax_rate || !item.tax || !item.pre_tax_rate || !item.b_amount) {
-            const taxRate = item.rate < this.pos_profile.custom_tax_limit ? 5 : 12;
-            let tax;
-            if (taxRate === 5) {
-              tax = +(item.rate * (taxRate / 105)).toFixed(2);
-            } else {
-              tax = +(item.rate * (taxRate / 112)).toFixed(2);
-            }
-
-            let preTaxRate;
-            if (taxRate === 5) {
-              preTaxRate = +((item.rate * 100)/105).toFixed(2);
-            } else {
-              preTaxRate = +((item.rate * 100)/112).toFixed(2);
-            }
-
-          
-            item.tax_rate = taxRate;
-            item.tax = tax.toFixed(2);
-            item.pre_tax_rate = preTaxRate.toFixed(2);
-            item.b_amount = (preTaxRate * item.qty).toFixed(2);
+      try {
+        const original_invoice = await frappe.call({
+          method: 'frappe.client.get',
+          args: {
+            doctype: 'Sales Invoice',
+            name: data.return_against
           }
         });
-      } else {
-        console.log("Warning: No items in return invoice");
-      }
-      
-      this.customer = data.customer;
-      this.posting_date = data.posting_date || frappe.datetime.nowdate();
-      this.discount_amount = data.discount_amount;
-      this.additional_discount_percentage =
-        data.additional_discount_percentage;
         
-      if (this.items.length > 0) {
-        this.items.forEach((item) => {
-          if (item.serial_no) {
-            item.serial_no_selected = [];
-            const serial_list = item.serial_no.split("\n");
-            serial_list.forEach((element) => {
-              if (element.length) {
-                item.serial_no_selected.push(element);
+        if (original_invoice.message) {
+          console.log("Original invoice discount fields:", {
+            discount_amount: original_invoice.message.discount_amount,
+            additional_discount_percentage: original_invoice.message.additional_discount_percentage,
+            base_discount_amount: original_invoice.message.base_discount_amount
+          });
+          
+          // CRITICAL FIX: If return invoice has no discount but original does, copy from original
+          if ((!data.discount_amount && !data.additional_discount_percentage) && 
+              (original_invoice.message.discount_amount || original_invoice.message.additional_discount_percentage)) {
+            
+            console.log("🔧 FIXING: Copying discount from original invoice to return");
+            
+            // Copy discount values from original (they should already be negative in return)
+            data.discount_amount = original_invoice.message.discount_amount || 0;
+            data.additional_discount_percentage = original_invoice.message.additional_discount_percentage || 0;
+            
+            console.log("Applied discount from original:", {
+              discount_amount: data.discount_amount,
+              additional_discount_percentage: data.additional_discount_percentage
+            });
+          }
+          
+          // Handle item mapping
+          if (original_invoice.message.items && data.items && data.items.length > 0) {
+            const original_items = original_invoice.message.items;
+            
+            data.items.forEach(returnItem => {
+              const originalItem = original_items.find(origItem => 
+                origItem.item_code.trim().toUpperCase() === returnItem.item_code.trim().toUpperCase()
+              );
+              
+              if (originalItem) {
+                returnItem.sales_invoice_item = originalItem.name;
+                console.log(`Setting sales_invoice_item for ${returnItem.item_code} to ${originalItem.name}`);
               }
             });
-            item.serial_no_selected_count = item.serial_no_selected.length;
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching original invoice:", error);
+      }
+    } else {
+      console.log("Return without invoice reference");
+      this.eventBus.emit("set_customer_readonly", false);
+    }
+    
+    this.invoiceType = "Return";
+    this.invoiceTypes = ["Return"];
+  }
+  
+  this.invoice_doc = data;
+  this.items = data.items || [];
+  
+  // Process items...
+  if (this.items.length > 0) {
+    this.update_items_details(this.items);
+    this.posa_offers = data.posa_offers || [];
+    this.items.forEach((item) => {
+      if (!item.posa_row_id) {
+        item.posa_row_id = this.makeid(20);
+      }
+      if (item.batch_no) {
+        this.set_batch_qty(item, item.batch_no);
+      }
+      // Tax calculations...
+      if (!item.tax_rate || !item.tax || !item.pre_tax_rate || !item.b_amount) {
+        const taxRate = item.rate < this.pos_profile.custom_tax_limit ? 5 : 12;
+        let tax = taxRate === 5 ? +(item.rate * (taxRate / 105)).toFixed(2) : +(item.rate * (taxRate / 112)).toFixed(2);
+        let preTaxRate = taxRate === 5 ? +((item.rate * 100)/105).toFixed(2) : +((item.rate * 100)/112).toFixed(2);
+        
+        item.tax_rate = taxRate;
+        item.tax = tax.toFixed(2);
+        item.pre_tax_rate = preTaxRate.toFixed(2);
+        item.b_amount = (preTaxRate * item.qty).toFixed(2);
+      }
+    });
+  }
+  
+  this.customer = data.customer;
+  this.posting_date = data.posting_date || frappe.datetime.nowdate();
+  
+  // ENHANCED DISCOUNT ASSIGNMENT - Try multiple approaches
+  console.log("=== DISCOUNT ASSIGNMENT PHASE ===");
+  
+  // Method 1: Direct assignment (your current approach)
+  let finalDiscountAmount = data.discount_amount || 0;
+  let finalDiscountPercentage = data.additional_discount_percentage || 0;
+  
+  // Method 2: Check alternative field names that might have been used previously
+  if (!finalDiscountAmount && !finalDiscountPercentage) {
+    console.log("Trying alternative field names...");
+    
+    finalDiscountAmount = data.additional_discount || data.base_discount_amount || 0;
+    finalDiscountPercentage = data.discount_percentage || 0;
+    
+    console.log("Alternative fields found:", {
+      additional_discount: data.additional_discount,
+      base_discount_amount: data.base_discount_amount,
+      discount_percentage: data.discount_percentage
+    });
+  }
+  
+  // Method 3: For returns, ensure correct sign
+  if (data.is_return) {
+    console.log("Processing return discount signs...");
+    
+    // If values are positive but this is a return, they might need to be negative
+    if (finalDiscountAmount > 0) {
+      console.log("Converting positive discount to negative for return");
+      finalDiscountAmount = Math.abs(finalDiscountAmount);
+    }
+    if (finalDiscountPercentage > 0) {
+      console.log("Converting positive discount percentage to negative for return");
+      finalDiscountPercentage = -Math.abs(finalDiscountPercentage);
+    }
+  }
+  
+  // Assign final values
+  this.discount_amount = finalDiscountAmount;
+  this.additional_discount = finalDiscountAmount;
+  this.additional_discount_percentage = -finalDiscountPercentage;
+  
+  console.log("FINAL DISCOUNT VALUES ASSIGNED:", {
+    discount_amount: this.discount_amount,
+    additional_discount: -this.additional_discount,
+    additional_discount_percentage: this.additional_discount_percentage,
+    is_return: data.is_return
+  });
+ 
+  if (this.items.length > 0) {
+    this.items.forEach((item) => {
+      if (item.serial_no) {
+        item.serial_no_selected = [];
+        const serial_list = item.serial_no.split("\n");
+        serial_list.forEach((element) => {
+          if (element.length) {
+            item.serial_no_selected.push(element);
           }
         });
+        item.serial_no_selected_count = item.serial_no_selected.length;
       }
-      
-      if (data.is_return) {
-        console.log("Setting return values for discounts");
-        this.discount_amount = -data.discount_amount;
-        this.additional_discount_percentage =
-          -data.additional_discount_percentage;
-        this.return_doc = data;
-      } else {
-        this.eventBus.emit("set_pos_coupons", data.posa_coupons);
-      }
-      
-      console.log("load_invoice completed, invoice state:", {
-        invoiceType: this.invoiceType,
-        is_return: this.invoice_doc.is_return,
-        items: this.items.length,
-        customer: this.customer
-      });
-    },
+    });
+  }
+  
+  if (data.is_return) {
+    this.return_doc = data;
+    console.log("Return processing completed with discount values:", {
+      discount_amount: this.discount_amount,
+      additional_discount: this.additional_discount,
+      additional_discount_percentage: this.additional_discount_percentage
+    });
+  } else {
+    this.eventBus.emit("set_pos_coupons", data.posa_coupons);
+  }
+  
+  console.log("load_invoice completed successfully");
+},
 
     // Save and clear the current invoice (draft logic)
     save_and_clear_invoice() {
@@ -1374,164 +1459,218 @@ add_free_item(item) {
 
     // Build the invoice document object for backend submission
     get_invoice_doc() {
-      let doc = {};
-      if (this.invoice_doc.name) {
-        doc = { ...this.invoice_doc };
-      }
-      
-      // Always set these fields first
-      doc.doctype = "Sales Invoice";
-      doc.is_pos = 1;
-      doc.ignore_pricing_rule = 1;
-      doc.company = doc.company || this.pos_profile.company;
-      doc.pos_profile = doc.pos_profile || this.pos_profile.name;
-      doc.set_posting_time = 1;
-      doc.posting_date = this.posting_date;
-      if (this.pos_profile.custom_discount_account) {
-        doc.additional_discount_account = this.pos_profile.custom_discount_account;
-      }
-      
-      // Currency related fields
-      doc.currency = this.selected_currency || this.pos_profile.currency;
-      doc.conversion_rate = this.exchange_rate || 1;
-      doc.plc_conversion_rate = this.exchange_rate || 1;
-      doc.price_list_currency = doc.currency;
-      
-      // Other fields
-      doc.campaign = doc.campaign || this.pos_profile.campaign;
-      doc.selling_price_list = this.pos_profile.selling_price_list;
-      doc.naming_series = doc.naming_series || this.pos_profile.naming_series;
-      doc.customer = this.customer;
-      
-      // Determine if this is a return invoice
-      const isReturn = this.invoiceType === 'Return' || this.invoice_doc.is_return;
-      doc.is_return = isReturn ? 1 : 0;
-      
-      // Calculate amounts in selected currency
-      const items = this.get_invoice_items();
-      doc.items = items;
-      
-      // Calculate totals in selected currency ensuring negative values for returns
-      let total = this.Total;
-      if (isReturn && total > 0) total = -Math.abs(total);
-      
-      doc.total = total;
-      doc.net_total = total;  // Net total is same as total before taxes
-      doc.base_total = total * (1 / this.exchange_rate || 1);
-      doc.base_net_total = total * (1 / this.exchange_rate || 1);
-      
-      // Apply discounts with correct sign for returns
-      let discountAmount = flt(this.additional_discount);
-      if (isReturn && discountAmount > 0) discountAmount = -Math.abs(discountAmount);
-      
-      doc.discount_amount = discountAmount;
-      doc.base_discount_amount = discountAmount * (1 / this.exchange_rate || 1);
-      
-      let discountPercentage = flt(this.additional_discount_percentage);
-      if (isReturn && discountPercentage > 0) discountPercentage = -Math.abs(discountPercentage);
-      
-      doc.additional_discount_percentage = discountPercentage;
-      
-      // Calculate grand total with correct sign for returns
-      let grandTotal = this.subtotal;
-      if (isReturn && grandTotal > 0) grandTotal = -Math.abs(grandTotal);
-      
-      doc.grand_total = grandTotal;
-      doc.base_grand_total = grandTotal * (1 / this.exchange_rate || 1);
-      
-      // Apply rounding to get rounded total
-      doc.rounded_total = this.roundAmount(grandTotal);
-      doc.base_rounded_total = this.roundAmount(doc.base_grand_total);
-      
-      // Add POS specific fields
-      doc.posa_pos_opening_shift = this.pos_opening_shift.name;
-      doc.payments = this.get_payments();
-      doc.taxes = [];
-      
-      // Handle return specific fields
-      if (isReturn) {
-        if (this.invoice_doc.return_against) {
-          doc.return_against = this.invoice_doc.return_against;
-        }
-        doc.update_stock = 1;
+  let doc = {};
+  if (this.invoice_doc.name) {
+    doc = { ...this.invoice_doc };
+  }
+  
+  // Always set these fields first
+  doc.doctype = "Sales Invoice";
+  doc.is_pos = 1;
+  doc.ignore_pricing_rule = 1;
+  doc.company = doc.company || this.pos_profile.company;
+  doc.pos_profile = doc.pos_profile || this.pos_profile.name;
+  doc.set_posting_time = 1;
+  doc.posting_date = this.posting_date;
+  if (this.pos_profile.custom_discount_account) {
+    doc.additional_discount_account = this.pos_profile.custom_discount_account;
+  }
+  
+  // Currency related fields
+  doc.currency = this.selected_currency || this.pos_profile.currency;
+  doc.conversion_rate = this.exchange_rate || 1;
+  doc.plc_conversion_rate = this.exchange_rate || 1;
+  doc.price_list_currency = doc.currency;
+  
+  // Other fields
+  doc.campaign = doc.campaign || this.pos_profile.campaign;
+  doc.selling_price_list = this.pos_profile.selling_price_list;
+  doc.naming_series = doc.naming_series || this.pos_profile.naming_series;
+  doc.customer = this.customer;
+  
+  // Determine if this is a return invoice
+  const isReturn = this.invoiceType === 'Return' || this.invoice_doc.is_return;
+  doc.is_return = isReturn ? 1 : 0;
+  
+  console.log("=== GET_INVOICE_DOC - RETURN PROCESSING ===");
+  console.log("Is Return:", isReturn);
+  console.log("UI Discount Values (positive for display):", {
+    additional_discount: this.additional_discount,
+    additional_discount_percentage: this.additional_discount_percentage,
+    discount_amount: this.discount_amount
+  });
+  
+  // Calculate amounts in selected currency
+  const items = this.get_invoice_items();
+  
+  // For returns, ensure sales_invoice_item is preserved
+  if (isReturn) {
+    const uiItemsWithReferences = this.items.filter(item => item.sales_invoice_item);
+    
+    if (uiItemsWithReferences.length > 0) {
+      for (const item of items) {
+        const normalized_item_code = item.item_code.trim().toUpperCase();
         
-        // Double-check all values are negative
-        if (doc.grand_total > 0) doc.grand_total = -Math.abs(doc.grand_total);
-        if (doc.base_grand_total > 0) doc.base_grand_total = -Math.abs(doc.base_grand_total);
-        if (doc.rounded_total > 0) doc.rounded_total = -Math.abs(doc.rounded_total);
-        if (doc.base_rounded_total > 0) doc.base_rounded_total = -Math.abs(doc.base_rounded_total);
-        if (doc.total > 0) doc.total = -Math.abs(doc.total);
-        if (doc.base_total > 0) doc.base_total = -Math.abs(doc.base_total);
-        if (doc.net_total > 0) doc.net_total = -Math.abs(doc.net_total);
-        if (doc.base_net_total > 0) doc.base_net_total = -Math.abs(doc.base_net_total);
+        const uiItem = uiItemsWithReferences.find(ui => 
+          ui.item_code.trim().toUpperCase() === normalized_item_code
+        );
         
-        // Ensure payments have negative amounts
-        if (doc.payments && doc.payments.length) {
-          doc.payments.forEach(payment => {
-            if (payment.amount > 0) payment.amount = -Math.abs(payment.amount);
-            if (payment.base_amount > 0) payment.base_amount = -Math.abs(payment.base_amount);
-          });
+        if (uiItem && uiItem.sales_invoice_item) {
+          console.log(`Preserving sales_invoice_item in get_invoice_doc for ${item.item_code}:`, uiItem.sales_invoice_item);
+          item.sales_invoice_item = uiItem.sales_invoice_item;
         }
       }
-      
-      // Add offer details
-      doc.posa_offers = this.posa_offers;
-      doc.posa_coupons = this.posa_coupons;
-      doc.posa_delivery_charges = this.selected_delivery_charge.name;
-      doc.posa_delivery_charges_rate = this.delivery_charges_rate || 0;
-      doc.posting_date = this.posting_date;
-      
-      // Add flags to ensure proper rate handling
-      doc.ignore_pricing_rule = 1;
-      doc.price_list_currency = doc.currency;
-      doc.plc_conversion_rate = doc.conversion_rate;
-      doc.ignore_default_fields = 1;  // Add this to prevent default field updates
-      
-      // Add custom fields to track offer rates
-      doc.posa_is_offer_applied = this.posa_offers.length > 0 ? 1 : 0;
-      
-      // Calculate base amounts using the exchange rate
+    }
+  }
+
+  doc.items = items;
+  
+  // Calculate totals in selected currency ensuring negative values for returns
+  let total = this.Total;
+  if (isReturn && total > 0) total = -Math.abs(total);
+  
+  doc.total = total;
+  doc.net_total = total;
+  doc.base_total = total * (1 / this.exchange_rate || 1);
+  doc.base_net_total = total * (1 / this.exchange_rate || 1);
+  
+  // FIXED: Proper discount handling for returns
+  let discountAmount = flt(this.additional_discount || 0);
+  let discountPercentage = flt(this.additional_discount_percentage || 0);
+
+  console.log("Raw discount values from UI:", {
+    discountAmount,
+    discountPercentage
+  });
+
+  // For returns: Convert positive UI values to negative for backend
+  if (isReturn) {
+    // Always convert to negative for returns, regardless of current sign
+    discountAmount = discountAmount !== 0 ? -Math.abs(discountAmount) : 0;
+    discountPercentage = discountPercentage !== 0 ? -Math.abs(discountPercentage) : 0;
+    
+    console.log("🔄 RETURN: Converting positive UI values to negative for backend:", {
+      ui_discount_amount: this.additional_discount,
+      ui_discount_percentage: this.additional_discount_percentage,
+      backend_discount_amount: discountAmount,
+      backend_discount_percentage: discountPercentage
+    });
+  }
+
+  doc.discount_amount = discountAmount;
+  doc.base_discount_amount = discountAmount * (1 / this.exchange_rate || 1);
+  doc.additional_discount_percentage = discountPercentage;
+
+  console.log("✅ FINAL discount values being sent to backend:", {
+    isReturn,
+    discount_amount: doc.discount_amount,
+    base_discount_amount: doc.base_discount_amount,
+    additional_discount_percentage: doc.additional_discount_percentage
+  });
+  console.log("==========================================");
+  
+  // Calculate grand total with correct sign for returns
+  let grandTotal = this.subtotal;
+  if (isReturn && grandTotal > 0) grandTotal = -Math.abs(grandTotal);
+  
+  doc.grand_total = grandTotal;
+  doc.base_grand_total = grandTotal * (1 / this.exchange_rate || 1);
+  
+  // Apply rounding to get rounded total
+  doc.rounded_total = this.roundAmount(grandTotal);
+  doc.base_rounded_total = this.roundAmount(doc.base_grand_total);
+  
+  // Add POS specific fields
+  doc.posa_pos_opening_shift = this.pos_opening_shift.name;
+  doc.payments = this.get_payments();
+  doc.taxes = [];
+  
+  // Handle return specific fields
+  if (isReturn) {
+    if (this.invoice_doc.return_against) {
+      doc.return_against = this.invoice_doc.return_against;
+    }
+    doc.update_stock = 1;
+    
+    // Double-check all values are negative for returns
+    if (doc.grand_total > 0) doc.grand_total = -Math.abs(doc.grand_total);
+    if (doc.base_grand_total > 0) doc.base_grand_total = -Math.abs(doc.base_grand_total);
+    if (doc.rounded_total > 0) doc.rounded_total = -Math.abs(doc.rounded_total);
+    if (doc.base_rounded_total > 0) doc.base_rounded_total = -Math.abs(doc.base_rounded_total);
+    if (doc.total > 0) doc.total = -Math.abs(doc.total);
+    if (doc.base_total > 0) doc.base_total = -Math.abs(doc.base_total);
+    if (doc.net_total > 0) doc.net_total = -Math.abs(doc.net_total);
+    if (doc.base_net_total > 0) doc.base_net_total = -Math.abs(doc.base_net_total);
+    
+    // Ensure payments have negative amounts
+    if (doc.payments && doc.payments.length) {
+      doc.payments.forEach(payment => {
+        if (payment.amount > 0) payment.amount = -Math.abs(payment.amount);
+        if (payment.base_amount > 0) payment.base_amount = -Math.abs(payment.base_amount);
+      });
+    }
+    
+    console.log("✅ FINAL RETURN INVOICE DOC:", {
+      discount_amount: doc.discount_amount,
+      additional_discount_percentage: doc.additional_discount_percentage,
+      grand_total: doc.grand_total,
+      total: doc.total,
+      is_return: doc.is_return
+    });
+  }
+  
+  // Add offer details
+  doc.posa_offers = this.posa_offers;
+  doc.posa_coupons = this.posa_coupons;
+  doc.posa_delivery_charges = this.selected_delivery_charge.name;
+  doc.posa_delivery_charges_rate = this.delivery_charges_rate || 0;
+  doc.posting_date = this.posting_date;
+  
+  // Add flags to ensure proper rate handling
+  doc.ignore_pricing_rule = 1;
+  doc.price_list_currency = doc.currency;
+  doc.plc_conversion_rate = doc.conversion_rate;
+  doc.ignore_default_fields = 1;
+  
+  // Add custom fields to track offer rates
+  doc.posa_is_offer_applied = this.posa_offers.length > 0 ? 1 : 0;
+  
+  // Calculate base amounts using the exchange rate
+  if (this.selected_currency !== this.pos_profile.currency) {
+    // Convert to base currency
+    doc.base_total = total * this.exchange_rate;
+    doc.base_net_total = total * this.exchange_rate;
+    doc.base_discount_amount = discountAmount * this.exchange_rate;
+    doc.base_grand_total = grandTotal * this.exchange_rate;
+    doc.base_rounded_total = grandTotal * this.exchange_rate;
+  } else {
+    // Same currency
+    doc.base_total = total;
+    doc.base_net_total = total;
+    doc.base_discount_amount = discountAmount;
+    doc.base_grand_total = grandTotal;
+    doc.base_rounded_total = grandTotal;
+  }
+  
+  // Ensure payments have correct base amounts
+  if (doc.payments && doc.payments.length) {
+    doc.payments.forEach(payment => {
       if (this.selected_currency !== this.pos_profile.currency) {
-        // For returns, we need to ensure negative values
-        const multiplier = isReturn ? -1 : 1;
-        
-        // If exchange rate is 300 PKR = 1 USD
-        // To convert USD to PKR: multiply by exchange rate
-        doc.base_total = total * this.exchange_rate * multiplier;
-        doc.base_net_total = total * this.exchange_rate * multiplier;
-        doc.base_discount_amount = discountAmount * this.exchange_rate * multiplier;
-        doc.base_grand_total = grandTotal * this.exchange_rate * multiplier;
-        doc.base_rounded_total = grandTotal * this.exchange_rate * multiplier;
+        payment.base_amount = payment.amount * this.exchange_rate;
       } else {
-        // Same currency, just ensure negative values for returns
-        const multiplier = isReturn ? -1 : 1;
-        doc.base_total = total * multiplier;
-        doc.base_net_total = total * multiplier;
-        doc.base_discount_amount = discountAmount * multiplier;
-        doc.base_grand_total = grandTotal * multiplier;
-        doc.base_rounded_total = grandTotal * multiplier;
+        payment.base_amount = payment.amount;
       }
       
-      // Ensure payments have correct base amounts
-      if (doc.payments && doc.payments.length) {
-        doc.payments.forEach(payment => {
-          if (this.selected_currency !== this.pos_profile.currency) {
-            // Convert payment amount to base currency
-            payment.base_amount = payment.amount * this.exchange_rate;
-          } else {
-            payment.base_amount = payment.amount;
-          }
-          
-          // For returns, ensure negative values
-          if (isReturn) {
-            payment.amount = -Math.abs(payment.amount);
-            payment.base_amount = -Math.abs(payment.base_amount);
-          }
-        });
+      // For returns, ensure negative values
+      if (isReturn) {
+        payment.amount = -Math.abs(payment.amount);
+        payment.base_amount = -Math.abs(payment.base_amount);
       }
-      
-      return doc;
-    },
+    });
+  }
+  
+  return doc;
+},
 
     // Get invoice doc from order doc (for sales order to invoice conversion)
     async get_invoice_from_order_doc() {
