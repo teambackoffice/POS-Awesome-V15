@@ -94,13 +94,13 @@ const controllers = (frm) => {
 
 	frm.toggle_display('price_discount_scheme_section', frm.doc.offer !== 'Loyalty Point');
 	frm.toggle_display('discount_type', frm.doc.offer !== 'Loyalty Point');
-	frm.toggle_reqd('discount_type', frm.doc.offer !== 'Loyalty Point');
+	// frm.toggle_reqd('discount_type', frm.doc.offer !== 'Loyalty Point');
 
 	frm.toggle_display('rate', frm.doc.discount_type === 'Rate');
-	frm.toggle_reqd('rate', frm.doc.discount_type === 'Rate');
+	// frm.toggle_reqd('rate', frm.doc.discount_type === 'Rate');
 
 	frm.toggle_display('discount_amount', frm.doc.discount_type === 'Discount Amount');
-	frm.toggle_reqd('discount_amount', frm.doc.discount_type === 'Discount Amount');
+	// frm.toggle_reqd('discount_amount', frm.doc.discount_type === 'Discount Amount');
 
 	frm.toggle_display('discount_percentage', frm.doc.discount_type === 'Discount Percentage');
 	frm.toggle_reqd('discount_percentage', frm.doc.discount_type === 'Discount Percentage');

@@ -480,19 +480,22 @@
           ></v-switch>
         </v-col>
 
-      <v-col cols="6" v-if="invoice_doc && is_redeem">
-      <v-text-field
-        density="compact"
-        variant="outlined"
-        color="primary"
-        :label="frappe._('Available Return Amount')"
-        bg-color="white"
-        hide-details
-        :value="formatCurrency(total_customer_return_amount, invoice_doc.currency)"
-        readonly
-        :prefix="currencySymbol(invoice_doc.currency)"
-      ></v-text-field>
-    </v-col>
+        <v-col cols="6" v-if="invoice_doc && is_redeem">
+        <v-text-field
+          density="compact"
+          variant="outlined"
+          color="primary"
+          :label="frappe._('Available Return Amount')"
+          bg-color="white"
+          hide-details
+          :value="formatCurrency(total_customer_return_amount, invoice_doc.currency)"
+          readonly
+          :prefix="currencySymbol(invoice_doc.currency)"
+          @click="showReturnAmountDetails"
+          persistent-placeholder
+          
+        ></v-text-field>
+      </v-col>
     
           <v-col cols="6" v-if="!invoice_doc.is_return && pos_profile.use_customer_credit">
             <v-switch
@@ -974,39 +977,58 @@ export default {
   }
 },
   methods: {
+    showReturnAmountDetails() {
+      let message = `Available Return Amount: ${this.formatCurrency(this.total_customer_return_amount, this.invoice_doc.currency)}`;
+      
+      if (this.customer_return_invoices && this.customer_return_invoices.length > 0) {
+        message += `\n\nReturn Invoices:`;
+        this.customer_return_invoices.forEach(invoice => {
+          message += `\n${invoice.name}: ${this.formatCurrency(Math.abs(invoice.outstanding_amount), this.invoice_doc.currency)}`;
+        });
+      } else {
+        message += `\n\nNo return invoices found.`;
+      }
+      
+      this.eventBus.emit("show_message", {
+        title: message,
+        color: "info",
+      });
+    },
     applyReturnCalculationToPayments() {
-    if (!this.invoice_doc || !this.invoice_doc.payments) return;
-    
-    // Get the base payment total (before return calculation)
-    const baseTotal = this.getBaseTotalPayments();
-    
+    if (!this.invoice_doc || !this.invoice_doc.payments || !this.originalPaymentAmounts) return;
+
+    const baseTotal = Object.values(this.originalPaymentAmounts).reduce((total, val) => total + (parseFloat(val) || 0), 0);
+    console.log("Base Total Payments (from stored originals):", baseTotal);
+
     if (this.is_redeem && this.total_customer_return_amount > 0 && baseTotal > 0) {
       const calculatedAmount = baseTotal - this.total_customer_return_amount;
-      
-      // Only apply if result is positive
+
       if (calculatedAmount > 0) {
-        // Calculate the reduction ratio
         const reductionRatio = calculatedAmount / baseTotal;
-        
-        // Apply the ratio to all payment methods that have amounts
-        this.invoice_doc.payments.forEach((payment) => {
-          if (payment.amount > 0) {
-            const originalAmount = payment.amount;
-            const newAmount = this.flt(originalAmount * reductionRatio, this.currency_precision);
-            
-            payment.amount = newAmount;
-            if (payment.base_amount !== undefined) {
-              payment.base_amount = newAmount;
-            }
-            
-            console.log(`Updated ${payment.mode_of_payment}: ${originalAmount} -> ${newAmount}`);
+
+        const updatedPayments = this.invoice_doc.payments.map((payment) => {
+          const originalAmount = this.originalPaymentAmounts[payment.mode_of_payment] || 0;
+          let newAmount = originalAmount;
+          if (originalAmount > 0) {
+            newAmount = this.flt(originalAmount * reductionRatio, this.currency_precision);
           }
+          return {
+            ...payment,
+            amount: newAmount,
+            base_amount: newAmount
+          };
         });
-        
-        this.$forceUpdate();
+
+        this.invoice_doc.payments = updatedPayments;
+
+        this.$nextTick(() => {
+          this.$forceUpdate();
+        });
       }
     }
   },
+
+
   restoreOriginalPaymentAmounts() {
     if (!this.invoice_doc || !this.invoice_doc.payments) return;
     
@@ -1030,16 +1052,17 @@ export default {
     
     this.$forceUpdate();
   },
-    storeOriginalPaymentAmounts() {
-      if (!this.originalPaymentAmounts) {
-        this.originalPaymentAmounts = {};
-        if (this.invoice_doc && this.invoice_doc.payments) {
-          this.invoice_doc.payments.forEach((payment) => {
-            this.originalPaymentAmounts[payment.mode_of_payment] = payment.amount;
-          });
-        }
+  storeOriginalPaymentAmounts() {
+    if (!this.originalPaymentAmounts) {
+      this.originalPaymentAmounts = {};
+      if (this.invoice_doc && this.invoice_doc.payments) {
+        this.invoice_doc.payments.forEach((payment) => {
+          this.originalPaymentAmounts[payment.mode_of_payment] = payment.amount;
+        });
       }
-    },
+    }
+  },
+
     getBaseTotalPayments() {
     let total = 0;
     if (this.invoice_doc && this.invoice_doc.payments) {
@@ -1099,13 +1122,6 @@ export default {
     onRedeemToggle() {
     if (this.is_redeem) {
       this.get_customer_return_invoices();
-      // Wait for return invoices to load, then apply calculation
-      this.$nextTick(() => {
-        setTimeout(() => {
-          this.storeOriginalPaymentAmounts();
-          this.applyReturnCalculationToPayments();
-        }, 100);
-      });
     } else {
       this.customer_return_invoices = [];
       this.customer_return_amount = 0;

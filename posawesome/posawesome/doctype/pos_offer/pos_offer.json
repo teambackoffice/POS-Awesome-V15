@@ -116,6 +116,7 @@
    "fieldtype": "Column Break"
   },
   {
+   "allow_bulk_edit": 1,
    "fieldname": "item",
    "fieldtype": "Table",
    "label": "Apply Rule On Item Code",
@@ -204,9 +205,11 @@
    "label": "Price Discount Scheme "
   },
   {
+   "depends_on": "eval:doc.apply_on !=\"Buy Get Free\"",
    "fieldname": "discount_type",
    "fieldtype": "Select",
    "label": "Discount Type",
+   "mandatory_depends_on": "eval:doc.apply_on !=\"Buy Get Free\"",
    "options": "\nRate\nDiscount Percentage\nDiscount Amount"
   },
   {
@@ -255,18 +258,20 @@
    "label": "Given Quantity"
   },
   {
+   "depends_on": "eval:doc.apply_on !=\"Buy Get Free\"",
    "fieldname": "quantity_and_amount_section",
    "fieldtype": "Section Break",
    "label": "Quantity and Amount Conditions"
   },
   {
+   "depends_on": "eval:doc.apply_on != \"Buy Get Free\"",
    "fieldname": "offer",
    "fieldtype": "Select",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Promo Type",
-   "options": "Item Price\nGive Product\nGrand Total\nLoyalty Point",
-   "reqd": 1
+   "mandatory_depends_on": "eval:doc.apply_on != \"Buy Get Free\"",
+   "options": "Item Price\nGive Product\nGrand Total\nLoyalty Point"
   },
   {
    "fieldname": "section_break_3",
@@ -320,7 +325,7 @@
   {
    "fieldname": "min_buy_quantity",
    "fieldtype": "Float",
-   "label": "Min Buy Quantity ",
+   "label": "Buy Quantity ",
    "mandatory_depends_on": "eval:doc.apply_on ==\"Buy Get Free\""
   },
   {
@@ -330,10 +335,11 @@
   {
    "fieldname": "max_get_quantity",
    "fieldtype": "Float",
-   "label": "Max Get Quantity",
+   "label": "Get Quantity",
    "mandatory_depends_on": "eval:doc.apply_on ==\"Buy Get Free\""
   },
   {
+   "allow_bulk_edit": 1,
    "depends_on": "eval:doc.apply_on ==\"Buy Get Free\"",
    "fieldname": "rule_item_code",
    "fieldtype": "Table",
@@ -344,7 +350,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-05-15 12:49:13.510212",
+ "modified": "2025-05-23 15:28:20.323108",
  "modified_by": "Administrator",
  "module": "POSAwesome",
  "name": "POS Offer",
