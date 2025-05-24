@@ -2262,4 +2262,26 @@ def get_available_currencies():
     """Get list of available currencies from ERPNext"""
     return frappe.get_all("Currency", fields=["name", "currency_name"], 
                          filters={"enabled": 1}, order_by="currency_name")
+
+@frappe.whitelist()
+def get_product_bundle(item_code, pos_profile):
+   
+    bundle_name = frappe.get_value("Product Bundle", {"new_item_code": item_code}, "name")
     
+    if not bundle_name:
+        return None 
+
+    bundle = frappe.get_doc("Product Bundle", bundle_name)
+
+    return {
+        "name": bundle.name,
+        "items": [
+            {
+                "item_code": item.item_code,
+                "qty": item.qty,
+                "rate": item.rate,
+                "uom": item.uom
+            }
+            for item in bundle.items
+        ]
+    }
