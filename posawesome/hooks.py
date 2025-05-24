@@ -258,6 +258,7 @@ fixtures = [
                     "POS Profile-posa_allow_reconcile_payments",
                     "POS Profile-column_break_uolvm",
                     "POS Profile-posa_allow_mpesa_reconcile_payments",
+                    "POS Profile-custom_product_bundle"
                 ),
             ]
         ],
@@ -266,16 +267,16 @@ fixtures = [
         "doctype": "Property Setter",
         "filters": [["name", "in", ("Sales Invoice-posa_pos_opening_shift-no_copy")]],
     },
-    {
-        "doctype": "Custom Field",
-        "filters": [
-            [
-                "name",
-                "in",
-                [
-                    "POS Profile-posa_allow_multi_currency"
-                ]
-            ]
-        ]
-    }
+    # {
+    #     "doctype": "Custom Field",
+    #     "filters": [
+    #         [
+    #             "name",
+    #             "in",
+    #             [
+    #                 "POS Profile-posa_allow_multi_currency"
+    #             ]
+    #         ]
+    #     ]
+    # }
 ]
