@@ -306,52 +306,166 @@ export default {
     click_item_row(event, { item }) {
       this.add_item(item)
     },
-    add_item(item) {
+
+    async getProductBundle(item_code) {
+      try {
+        const response = await new Promise((resolve, reject) => {
+          frappe.call({
+            method: "posawesome.posawesome.api.posapp.get_product_bundle",
+            args: {
+              item_code: item_code,
+              pos_profile: this.pos_profile
+            },
+            callback: function(r) {
+              resolve(r);
+            },
+            error: function(err) {
+              reject(err);
+            }
+          });
+        });
+        
+        return response.message;
+      } catch (error) {
+        console.error('Error fetching product bundle:', error);
+        throw error;
+      }
+    },
+
+    /**
+     * Process product bundle and add bundle items
+     */
+    async processProductBundle(item_code, quantity = 1) {
+      
+      if (!this.pos_profile.custom_product_bundle) {
+        return false;
+      }
+
+      try {
+        const product_bundle = await this.getProductBundle(item_code);
+        
+        if (product_bundle && Array.isArray(product_bundle.items)) {
+          
+          const bundle_items = product_bundle.items.map(bundle_item => ({
+            item_code: bundle_item.item_code,
+            qty: bundle_item.qty * quantity,
+            uom: bundle_item.uom,
+            custom_bundle_id: product_bundle.name,
+            is_bundle_item: true,
+            parent_bundle: item_code
+          }));
+
+          // Add bundle items to cart
+          for (const bundle_item of bundle_items) {
+            
+            // Find the item details from your items list
+            const item_details = this.items.find(item => item.item_code === bundle_item.item_code);
+            
+            if (item_details) {
+              // Merge bundle item data with item details
+              const enhanced_bundle_item = {
+                ...item_details,
+                ...bundle_item,
+                qty: bundle_item.qty,
+                is_bundle_item: true,
+                parent_bundle: item_code,
+                custom_bundle_id: product_bundle.name
+              };
+              
+              // Emit event to add bundle item to cart
+              this.eventBus.emit("add_item", enhanced_bundle_item);
+            } else {
+              console.warn(`Bundle item not found in items list: ${bundle_item.item_code}`);
+              this.eventBus.emit("show_message", {
+                title: `Bundle item not found: ${bundle_item.item_code}`,
+                color: "warning",
+              });
+            }
+          }
+
+          // Show success message
+          this.eventBus.emit("show_message", {
+            title: `Product bundle "${product_bundle.name}" added successfully`,
+            color: "success",
+          });
+
+          return true;
+        }
+      } catch (error) {
+        console.error('Error processing product bundle:', error);
+        this.eventBus.emit("show_message", {
+          title: `Failed to process product bundle: ${error.message}`,
+          color: "error",
+        });
+        return false;
+      }
+      
+      return false;
+    },
+
+    // UPDATED add_item method to handle product bundles
+    async add_item(item) {
       item = { ...item };
+      
       if (item.has_variants) {
         this.eventBus.emit("open_variants_model", item, this.items);
-      } else {
-        if (item.actual_qty === 0 && this.pos_profile.posa_display_items_in_stock) {
-          this.eventBus.emit("show_message", {
-            title: `No stock available for ${item.item_name}`,
-            color: "warning",
-          });
-          this.update_items_details([item]);
+        return;
+      }
+
+      // Check stock availability
+      if (item.actual_qty === 0 && this.pos_profile.posa_display_items_in_stock) {
+        this.eventBus.emit("show_message", {
+          title: `No stock available for ${item.item_name}`,
+          color: "warning",
+        });
+        this.update_items_details([item]);
+        return;
+      }
+
+      // Check if this item is a product bundle
+      if (this.pos_profile.custom_product_bundle) {
+        console.log('Item is a product bundle:', item.item_code);
+        
+        const quantity = Math.abs(this.qty);
+        const bundleProcessed = await this.processProductBundle(item.item_code, quantity);
+        
+        if (bundleProcessed) {
+          this.qty = 1;
           return;
         }
-        
-        // Ensure UOMs are initialized before adding the item
-        if (!item.item_uoms || item.item_uoms.length === 0) {
-          // If UOMs are not available, fetch them first
-          this.update_items_details([item]);
-          
-          // Add stock UOM as fallback
-          if (!item.item_uoms || item.item_uoms.length === 0) {
-            item.item_uoms = [{ uom: item.stock_uom, conversion_factor: 1.0 }];
-          }
-        }
-        
-        // Convert rate if multi-currency is enabled
-        if (this.pos_profile.posa_allow_multi_currency && 
-            this.selected_currency !== this.pos_profile.currency) {
-          // Store original rate as base_rate
-          item.base_rate = item.rate;
-          item.base_price_list_rate = item.price_list_rate;
-          
-          // Set converted rates
-          item.rate = this.getConvertedRate(item);
-          item.price_list_rate = this.getConvertedRate(item);
-          
-          // Set currency
-          item.currency = this.selected_currency;
-        }
-
-        if (!item.qty || item.qty === 1) {
-          item.qty = Math.abs(this.qty);
-        }
-        this.eventBus.emit("add_item", item);
-        this.qty = 1;
       }
+      
+      // Ensure UOMs are initialized before adding the item
+      if (!item.item_uoms || item.item_uoms.length === 0) {
+        // If UOMs are not available, fetch them first
+        this.update_items_details([item]);
+        
+        // Add stock UOM as fallback
+        if (!item.item_uoms || item.item_uoms.length === 0) {
+          item.item_uoms = [{ uom: item.stock_uom, conversion_factor: 1.0 }];
+        }
+      }
+      
+      // Convert rate if multi-currency is enabled
+      if (this.pos_profile.posa_allow_multi_currency && 
+          this.selected_currency !== this.pos_profile.currency) {
+        // Store original rate as base_rate
+        item.base_rate = item.rate;
+        item.base_price_list_rate = item.price_list_rate;
+        
+        // Set converted rates
+        item.rate = this.getConvertedRate(item);
+        item.price_list_rate = this.getConvertedRate(item);
+        
+        // Set currency
+        item.currency = this.selected_currency;
+      }
+
+      if (!item.qty || item.qty === 1) {
+        item.qty = Math.abs(this.qty);
+      }
+      this.eventBus.emit("add_item", item);
+      this.qty = 1;
     },
     enter_event() {
       let match = false;

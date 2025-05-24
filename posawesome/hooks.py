@@ -97,6 +97,7 @@ doc_events = {
         "validate": "posawesome.posawesome.api.invoice.validate",
         "before_submit": "posawesome.posawesome.api.invoice.before_submit",
         "before_cancel": "posawesome.posawesome.api.invoice.before_cancel",
+        "on_submit": "posawesome.posawesome.api.invoice.create_delivery_note",
     },
     "Customer": {
         "validate": "posawesome.posawesome.api.customer.validate",
