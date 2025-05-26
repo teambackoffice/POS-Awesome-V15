@@ -74,7 +74,8 @@
             density="default">
             <template v-slot:activator="{ props }">
               <v-text-field v-model="formatted_posting_date" :label="frappe._('Posting Date')" readonly
-                variant="outlined" density="compact" clearable color="primary" hide-details
+                variant="solo" density="compact" clearable color="primary" hide-details
+                prepend-inner-icon="mdi-calendar"
                 v-bind="props"></v-text-field>
             </template>
             <v-date-picker v-model="posting_date" no-title scrollable color="primary"
@@ -115,7 +116,7 @@
       </v-row>
 
       <!-- Items Table Section (Main items list for invoice) -->
-      <div class="my-0 py-0 overflow-y-auto" style="max-height: calc(70vh - 180px)">
+      <div class="my-0 py-0 overflow-y-auto mt-3" style="max-height: calc(70vh - 180px)">
         <!-- Main Items Data Table -->
         <v-data-table 
           :headers="items_headers" 
@@ -354,13 +355,13 @@
             <!-- Total Qty -->
             <v-col cols="6">
               <v-text-field :model-value="formatFloat(total_qty)" :label="frappe._('Total Qty')"
-                prepend-inner-icon="mdi-format-list-numbered" variant="outlined" density="compact" readonly
+                prepend-inner-icon="mdi-format-list-numbered" variant="solo" density="compact" readonly
                 color="accent" />
             </v-col>
             <!-- Additional Discount (Amount or Percentage) -->
             <v-col cols="6" v-if="!pos_profile.posa_use_percentage_discount">
               <v-text-field v-model="additional_discount" :label="frappe._('Additional Discount')"
-                prepend-inner-icon="mdi-cash-minus" variant="outlined" density="compact" color="warning"
+                prepend-inner-icon="mdi-cash-minus" variant="solo" density="compact" color="warning"
                 :prefix="currencySymbol(pos_profile.currency)"
                 :disabled="!pos_profile.posa_allow_user_to_edit_additional_discount" />
             </v-col>
@@ -368,7 +369,7 @@
             <v-col cols="6" v-else>
               <v-text-field v-model="additional_discount_percentage" @change="update_discount_umount()"
                 :rules="[isNumber]" :label="frappe._('Additional Discount %')" suffix="%"
-                prepend-inner-icon="mdi-percent" variant="outlined" density="compact" color="warning"
+                prepend-inner-icon="mdi-percent" variant="solo" density="compact" color="warning"
                 :disabled="!pos_profile.posa_allow_user_to_edit_additional_discount || !!discount_percentage_offer_name" />
             </v-col>
 
@@ -376,13 +377,13 @@
             <v-col cols="6">
               <v-text-field :model-value="formatCurrency(total_items_discount_amount)"
                 :prefix="currencySymbol(displayCurrency)" :label="frappe._('Items Discounts')" 
-                prepend-inner-icon="mdi-tag-minus" variant="outlined" density="compact" color="warning" readonly />
+                prepend-inner-icon="mdi-tag-minus" variant="solo" density="compact" color="warning" readonly />
             </v-col>
 
             <!-- Total (moved to maintain row alignment) -->
             <v-col cols="6">
               <v-text-field :model-value="formatCurrency(subtotal)" :prefix="currencySymbol(displayCurrency)"
-                :label="frappe._('Total')" prepend-inner-icon="mdi-cash" variant="outlined" density="compact" readonly
+                :label="frappe._('Total')" prepend-inner-icon="mdi-cash" variant="solo" density="compact" readonly
                 color="success" />
             </v-col>
           </v-row>
@@ -1059,6 +1060,9 @@ add_free_item(item) {
       if (!item.posa_is_replace) {
         item.posa_is_replace = "";
       }
+      
+      // Initialize flag for tracking manual rate changes
+      new_item._manual_rate_set = false;
 
       // Set negative quantity for return invoices
       if (this.invoiceType === "Return" && item.qty > 0) {
@@ -1070,7 +1074,20 @@ add_free_item(item) {
       new_item.discount_percentage = 0;
       new_item.discount_amount_per_item = 0;
       new_item.price_list_rate = item.rate;
-      new_item.base_price_list_rate = item.rate; // Add base_price_list_rate
+      
+      // Setup base rates properly for multi-currency
+      if (this.selected_currency !== this.pos_profile.currency) {
+        // Store original base currency values
+        new_item.base_price_list_rate = item.rate * this.exchange_rate;
+        new_item.base_rate = item.rate * this.exchange_rate;
+        new_item.base_discount_amount = 0;
+      } else {
+        // In base currency, base rates = displayed rates
+        new_item.base_price_list_rate = item.rate;
+        new_item.base_rate = item.rate;
+        new_item.base_discount_amount = 0;
+      }
+      
       new_item.qty = item.qty;
       new_item.uom = item.uom ? item.uom : item.stock_uom;
       // Ensure item_uoms is initialized
@@ -1767,10 +1784,12 @@ async load_invoice(data = {}) {
           // item.rate is in USD (e.g. 10 USD)
           // base_rate should be in PKR (e.g. 3000 PKR)
           new_item.rate = flt(item.rate);  // Keep rate in USD
-          new_item.base_rate = flt(item.rate * this.exchange_rate);  // Convert to PKR
+          
+          // Use pre-stored base_rate if available, otherwise calculate
+          new_item.base_rate = item.base_rate || flt(item.rate * this.exchange_rate);
           
           new_item.price_list_rate = flt(item.price_list_rate);  // Keep price list rate in USD
-          new_item.base_price_list_rate = flt(item.price_list_rate * this.exchange_rate);  // Convert to PKR
+          new_item.base_price_list_rate = item.base_price_list_rate || flt(item.price_list_rate * this.exchange_rate);
           
           // Calculate amounts
           new_item.amount = flt(item.qty) * new_item.rate;  // Amount in USD
@@ -1778,17 +1797,17 @@ async load_invoice(data = {}) {
           
           // Handle discount amount
           new_item.discount_amount = flt(item.discount_amount);  // Keep discount in USD
-          new_item.base_discount_amount = flt(item.discount_amount * this.exchange_rate);  // Convert to PKR
+          new_item.base_discount_amount = item.base_discount_amount || flt(item.discount_amount * this.exchange_rate);
         } else {
-          // Same currency (PKR), no conversion needed
+          // Same currency (base currency), make sure we use base rates if available
           new_item.rate = flt(item.rate);
-          new_item.base_rate = flt(item.rate);
+          new_item.base_rate = item.base_rate || flt(item.rate);
           new_item.price_list_rate = flt(item.price_list_rate);
-          new_item.base_price_list_rate = flt(item.price_list_rate);
+          new_item.base_price_list_rate = item.base_price_list_rate || flt(item.price_list_rate);
           new_item.amount = flt(item.qty) * new_item.rate;
           new_item.base_amount = new_item.amount;
           new_item.discount_amount = flt(item.discount_amount);
-          new_item.base_discount_amount = flt(item.discount_amount);
+          new_item.base_discount_amount = item.base_discount_amount || flt(item.discount_amount);
         }
 
         // For returns, ensure all amounts are negative
@@ -2338,11 +2357,11 @@ async load_invoice(data = {}) {
       }
       var vm = this;
       
-      // Only update rate if no offer is applied
-      if (item.price_list_rate && !item.posa_offer_applied) {
-        item.rate = item.price_list_rate;
-        this.$forceUpdate();
-      }
+      // Remove this block which was causing the issue - rates should persist regardless of currency
+      // if (item.price_list_rate && !item.posa_offer_applied) {
+      //   item.rate = item.price_list_rate;
+      //   this.$forceUpdate();
+      // }
 
       frappe.call({
         method: "posawesome.posawesome.api.posapp.get_item_detail",
@@ -2434,7 +2453,13 @@ async load_invoice(data = {}) {
               // Calculate discount in selected currency
               const discount_amount = vm.flt((item.price_list_rate * discount_percent) / 100, vm.currency_precision);
               item.discount_amount = discount_amount;
+              
+              // Also store base discount amount
+              item.base_discount_amount = vm.flt((item.base_price_list_rate * discount_percent) / 100, vm.currency_precision);
+              
+              // Update rates with discount
               item.rate = vm.flt(item.price_list_rate - discount_amount, vm.currency_precision);
+              item.base_rate = vm.flt(item.base_price_list_rate - item.base_discount_amount, vm.currency_precision);
             }
             
             // Update other item details
@@ -2451,6 +2476,17 @@ async load_invoice(data = {}) {
             // Calculate final amount
             item.amount = vm.flt(item.qty * item.rate, vm.currency_precision);
             item.base_amount = vm.flt(item.qty * item.base_rate, vm.currency_precision);
+            
+            // Log updated rates for debugging
+            console.log(`Updated rates for ${item.item_code} on expand:`, {
+              base_rate: item.base_rate,
+              rate: item.rate,
+              base_price_list_rate: item.base_price_list_rate, 
+              price_list_rate: item.price_list_rate,
+              exchange_rate: vm.exchange_rate,
+              selected_currency: vm.selected_currency,
+              default_currency: vm.pos_profile.currency
+            });
             
             // Force update UI immediately
             vm.$forceUpdate();
@@ -2565,8 +2601,6 @@ async load_invoice(data = {}) {
             // Calculate percentage based on converted values
             if (converted_price_list_rate) {
               item.discount_percentage = this.flt((item.discount_amount / converted_price_list_rate) * 100, this.float_precision);
-            } else {
-              item.discount_percentage = 0; // Avoid division by zero
             }
             break;
 
@@ -2662,6 +2696,12 @@ async load_invoice(data = {}) {
 
     // Calculate item price and discount fields
     calc_item_price(item) {
+      // Skip recalculation if called from update_item_rates to avoid double calculations
+      if (item._skip_calc) {
+        item._skip_calc = false;
+        return;
+      }
+      
       if (!item.posa_offer_applied) {
         if (item.price_list_rate) {
           // Always work with base rates first
@@ -2772,6 +2812,37 @@ async load_invoice(data = {}) {
           } else {
             item.rate = converted_rate;
             item.price_list_rate = converted_rate;
+          }
+        } else if (offer && offer.discount_type === "Discount Percentage") {
+          // For percentage discount, recalculate from original price but with new conversion factor
+          
+          // Update the base prices with new conversion factor
+          let updated_base_price;
+          if (item.original_base_price_list_rate) {
+            // Use original price adjusted for new conversion factor
+            updated_base_price = this.flt(item.original_base_price_list_rate * item.conversion_factor, this.currency_precision);
+          } else {
+            // Fallback if original price not stored
+            updated_base_price = this.flt(item.base_price_list_rate * conversion_ratio, this.currency_precision);
+          }
+          
+          // Store updated base price
+          item.base_price_list_rate = updated_base_price;
+          
+          // Recalculate discount based on percentage
+          const base_discount = this.flt((updated_base_price * offer.discount_percentage) / 100, this.currency_precision);
+          item.base_discount_amount = base_discount;
+          item.base_rate = this.flt(updated_base_price - base_discount, this.currency_precision);
+          
+          // Convert to selected currency if needed
+          if (this.selected_currency !== this.pos_profile.currency) {
+            item.price_list_rate = this.flt(updated_base_price / this.exchange_rate, this.currency_precision);
+            item.discount_amount = this.flt(base_discount / this.exchange_rate, this.currency_precision);
+            item.rate = this.flt(item.base_rate / this.exchange_rate, this.currency_precision);
+          } else {
+            item.price_list_rate = updated_base_price;
+            item.discount_amount = base_discount;
+            item.rate = item.base_rate;
           }
         }
       } else {
@@ -3032,12 +3103,9 @@ async load_invoice(data = {}) {
     }
   });
 
-  // Process offers that need special handling
-  this.setItemGiveOffer(offers);
-  
-  // Update the offers in the POS
-  this.updatePosOffers(offers);
-},
+      this.setItemGiveOffer(offers);
+      this.updatePosOffers(offers);
+    },
 
     setItemGiveOffer(offers) {
       // Set item give offer for replace
@@ -3151,7 +3219,6 @@ async load_invoice(data = {}) {
 
     getItemOffer(offer) {
       let apply_offer = null;
-
       if (offer.apply_on === "Item Code") {
         if (this.checkOfferCoupon(offer)) {
           const matchedItems = [];
@@ -3646,175 +3713,63 @@ async load_invoice(data = {}) {
 
 
     ApplyBuyGetFreeOffer(offer) {
-  console.log('Applying Buy-Get-Free offer:', offer.name);
-  
-  // First, check if this offer is already applied and needs to be updated
-  const existingOfferIndex = this.posa_offers.findIndex(o => o.offer_name === offer.name);
-  
-  if (existingOfferIndex !== -1) {
-    // Remove the existing offer effects first
-    console.log('Updating existing Buy Get Free offer');
-    this.RemoveBuyGetFreeOffer(this.posa_offers[existingOfferIndex]);
-  }
-  
-  if (!offer.matched_get_items || offer.matched_get_items.length === 0) {
-    console.log('No get items to make free');
-    return;
-  }
-  
-  // Apply the offer to get items (make them free or partially free)
-  offer.matched_get_items.forEach(getItem => {
-    const cartItem = this.items.find(item => item.posa_row_id === getItem.row_id);
+    console.log('Applying Buy-Get-Free offer:', offer.name);
     
-    if (!cartItem) {
-      console.log(`Get item ${getItem.item_code} not found in cart`);
+    const existingOfferIndex = this.posa_offers.findIndex(o => o.offer_name === offer.name);
+    
+    if (existingOfferIndex !== -1) {
+      console.log('Updating existing Buy Get Free offer');
+      this.RemoveBuyGetFreeOffer(this.posa_offers[existingOfferIndex]);
+    }
+    
+    if (!offer.matched_get_items || offer.matched_get_items.length === 0) {
+      console.log('No get items to make free');
       return;
     }
     
-    const item_offers = JSON.parse(cartItem.posa_offers || '[]');
-    
-    // Store original prices if not already stored
-    if (!cartItem.posa_offer_applied || !cartItem.original_base_rate) {
-      cartItem.original_base_rate = cartItem.base_rate;
-      cartItem.original_base_price_list_rate = cartItem.base_price_list_rate;
-      cartItem.original_rate = cartItem.rate;
-      cartItem.original_price_list_rate = cartItem.price_list_rate;
-    }
-    
-    const totalQty = parseFloat(cartItem.qty);
-    const freeQty = parseFloat(getItem.free_qty);
-    
-    if (freeQty >= totalQty) {
-      // Entire item is free
-      cartItem.base_rate = 0;
-      cartItem.rate = 0;
-      cartItem.discount_percentage = 100;
-      cartItem.discount_amount = cartItem.price_list_rate;
-      cartItem.base_discount_amount = cartItem.base_price_list_rate;
-      console.log(`${cartItem.item_code} is 100% free`);
-    } else if (freeQty > 0) {
-      // Partial discount based on free quantity
-      const freeRatio = freeQty / totalQty;
-      const discountPercentage = freeRatio * 100;
+    offer.matched_get_items.forEach(getItem => {
+      const cartItem = this.items.find(item => item.posa_row_id === getItem.row_id);
       
-      cartItem.discount_percentage = discountPercentage;
-      cartItem.discount_amount = this.flt(cartItem.price_list_rate * freeRatio, this.currency_precision);
-      cartItem.base_discount_amount = this.flt(cartItem.base_price_list_rate * freeRatio, this.currency_precision);
-      cartItem.rate = this.flt(cartItem.price_list_rate - cartItem.discount_amount, this.currency_precision);
-      cartItem.base_rate = this.flt(cartItem.base_price_list_rate - cartItem.base_discount_amount, this.currency_precision);
+      if (!cartItem) {
+        console.log(`Get item ${getItem.item_code} not found in cart`);
+        return;
+      }
       
-      console.log(`${cartItem.item_code} is ${discountPercentage.toFixed(2)}% off (${freeQty}/${totalQty} qty free)`);
-    }
-    
-    // Calculate final amounts
-    cartItem.amount = this.flt(cartItem.qty * cartItem.rate, this.currency_precision);
-    cartItem.base_amount = this.flt(cartItem.qty * cartItem.base_rate, this.currency_precision);
-    
-    // Update tax calculations
-    const taxRate = cartItem.rate < this.pos_profile.custom_tax_limit ? 5 : 12;
-    const tax = taxRate === 5 ? 
-      +(cartItem.rate * (taxRate / 105)).toFixed(2) : 
-      +(cartItem.rate * (taxRate / 112)).toFixed(2);
-    const preTaxRate = taxRate === 5 ? 
-      +((cartItem.rate * 100)/105).toFixed(2) : 
-      +((cartItem.rate * 100)/112).toFixed(2);
-    
-    cartItem.tax_rate = taxRate;
-    cartItem.tax = tax.toFixed(2);
-    cartItem.pre_tax_rate = preTaxRate.toFixed(2);
-    cartItem.b_amount = (preTaxRate * cartItem.qty).toFixed(2);
-    
-    // Mark as having offer applied
-    cartItem.posa_offer_applied = 1;
-    cartItem.buy_get_offer_applied = offer.name;
-    cartItem.buy_get_offer_role = 'get';
-    
-    // Add this offer to the item's offers if not already present
-    if (!item_offers.includes(offer.row_id)) {
-      item_offers.push(offer.row_id);
-    }
-    cartItem.posa_offers = JSON.stringify(item_offers);
-  });
-  
-  // Mark buy items as associated with this offer
-  offer.matched_buy_items.forEach(buyItem => {
-    const cartItem = this.items.find(item => item.posa_row_id === buyItem.row_id);
-    if (cartItem) {
       const item_offers = JSON.parse(cartItem.posa_offers || '[]');
-      if (!item_offers.includes(offer.row_id)) {
-        item_offers.push(offer.row_id);
-      }
-      cartItem.posa_offers = JSON.stringify(item_offers);
-      cartItem.buy_get_offer_role = 'buy';
-    }
-  });
-  
-  // Force UI update
-  this.$forceUpdate();
-  
-  // Show success message
-  this.eventBus.emit("show_message", {
-    title: __(`Buy Get Free offer applied: ${offer.possible_sets} set(s)`),
-    color: "success",
-  });
-},
-
-RemoveBuyGetFreeOffer(offer) {
-  console.log('Removing Buy-Get-Free offer:', offer.name);
-  
-  let offerItems = [];
-  offerItems = typeof offer.items === 'string' ? JSON.parse(offer.items) : offer.items;
-  
-  // Process all items affected by this offer
-  this.items.forEach(cartItem => {
-    let item_offers = [];
-    item_offers = JSON.parse(cartItem.posa_offers || '[]');
-    
-    if (item_offers.includes(offer.row_id)) {
-      // If this was a "get" item (free item), restore original prices
-      if (cartItem.buy_get_offer_applied === offer.offer_name && cartItem.buy_get_offer_role === 'get') {
-        if (cartItem.original_base_rate !== undefined) {
-          cartItem.base_rate = cartItem.original_base_rate;
-          cartItem.base_price_list_rate = cartItem.original_base_price_list_rate;
-          
-          if (this.selected_currency !== this.pos_profile.currency) {
-            cartItem.rate = this.flt(cartItem.base_rate / this.exchange_rate, this.currency_precision);
-            cartItem.price_list_rate = this.flt(cartItem.base_price_list_rate / this.exchange_rate, this.currency_precision);
-          } else {
-            cartItem.rate = cartItem.base_rate;
-            cartItem.price_list_rate = cartItem.base_price_list_rate;
-          }
-          
-          cartItem.discount_percentage = 0;
-          cartItem.discount_amount = 0;
-          cartItem.base_discount_amount = 0;
-          
-          // Clear original rate storage
-          cartItem.original_base_rate = null;
-          cartItem.original_base_price_list_rate = null;
-          cartItem.original_rate = null;
-          cartItem.original_price_list_rate = null;
-        }
+      
+      if (!cartItem.posa_offer_applied || !cartItem.original_base_rate) {
+        cartItem.original_base_rate = cartItem.base_rate;
+        cartItem.original_base_price_list_rate = cartItem.base_price_list_rate;
+        cartItem.original_rate = cartItem.rate;
+        cartItem.original_price_list_rate = cartItem.price_list_rate;
       }
       
-      // Remove offer from item's offer list
-      const updated_offers = item_offers.filter(id => id !== offer.row_id);
-      cartItem.posa_offers = JSON.stringify(updated_offers);
+      const totalQty = parseFloat(cartItem.qty);
+      const freeQty = parseFloat(getItem.free_qty);
       
-      // Clear offer applied flag if no other offers
-      if (updated_offers.length === 0) {
-        cartItem.posa_offer_applied = 0;
+      if (freeQty >= totalQty) {
+        cartItem.base_rate = 0;
+        cartItem.rate = 0;
+        cartItem.discount_percentage = 100;
+        cartItem.discount_amount = cartItem.price_list_rate;
+        cartItem.base_discount_amount = cartItem.base_price_list_rate;
+        console.log(`${cartItem.item_code} is 100% free`);
+      } else if (freeQty > 0) {
+        const freeRatio = freeQty / totalQty;
+        const discountPercentage = freeRatio * 100;
+        
+        cartItem.discount_percentage = discountPercentage;
+        cartItem.discount_amount = this.flt(cartItem.price_list_rate * freeRatio, this.currency_precision);
+        cartItem.base_discount_amount = this.flt(cartItem.base_price_list_rate * freeRatio, this.currency_precision);
+        cartItem.rate = this.flt(cartItem.price_list_rate - cartItem.discount_amount, this.currency_precision);
+        cartItem.base_rate = this.flt(cartItem.base_price_list_rate - cartItem.base_discount_amount, this.currency_precision);
+        
+        console.log(`${cartItem.item_code} is ${discountPercentage.toFixed(2)}% off (${freeQty}/${totalQty} qty free)`);
       }
       
-      // Clear buy-get offer specific fields
-      cartItem.buy_get_offer_applied = null;
-      cartItem.buy_get_offer_role = null;
-      
-      // Recalculate amounts
       cartItem.amount = this.flt(cartItem.qty * cartItem.rate, this.currency_precision);
       cartItem.base_amount = this.flt(cartItem.qty * cartItem.base_rate, this.currency_precision);
       
-      // Recalculate tax
       const taxRate = cartItem.rate < this.pos_profile.custom_tax_limit ? 5 : 12;
       const tax = taxRate === 5 ? 
         +(cartItem.rate * (taxRate / 105)).toFixed(2) : 
@@ -3827,12 +3782,104 @@ RemoveBuyGetFreeOffer(offer) {
       cartItem.tax = tax.toFixed(2);
       cartItem.pre_tax_rate = preTaxRate.toFixed(2);
       cartItem.b_amount = (preTaxRate * cartItem.qty).toFixed(2);
-    }
-  });
-  
-  // Force UI update
-  this.$forceUpdate();
-},
+      
+      cartItem.posa_offer_applied = 1;
+      cartItem.buy_get_offer_applied = offer.name;
+      cartItem.buy_get_offer_role = 'get';
+      
+      if (!item_offers.includes(offer.row_id)) {
+        item_offers.push(offer.row_id);
+      }
+      cartItem.posa_offers = JSON.stringify(item_offers);
+    });
+    
+    offer.matched_buy_items.forEach(buyItem => {
+      const cartItem = this.items.find(item => item.posa_row_id === buyItem.row_id);
+      if (cartItem) {
+        const item_offers = JSON.parse(cartItem.posa_offers || '[]');
+        if (!item_offers.includes(offer.row_id)) {
+          item_offers.push(offer.row_id);
+        }
+        cartItem.posa_offers = JSON.stringify(item_offers);
+        cartItem.buy_get_offer_role = 'buy';
+      }
+    });
+    
+    this.$forceUpdate();
+    
+    this.eventBus.emit("show_message", {
+      title: __(`Buy Get Free offer applied: ${offer.possible_sets} set(s)`),
+      color: "success",
+    });
+  },
+
+
+  RemoveBuyGetFreeOffer(offer) {
+    console.log('Removing Buy-Get-Free offer:', offer.name);
+    
+    let offerItems = [];
+    offerItems = typeof offer.items === 'string' ? JSON.parse(offer.items) : offer.items;
+    
+    this.items.forEach(cartItem => {
+      let item_offers = [];
+      item_offers = JSON.parse(cartItem.posa_offers || '[]');
+      
+      if (item_offers.includes(offer.row_id)) {
+        if (cartItem.buy_get_offer_applied === offer.offer_name && cartItem.buy_get_offer_role === 'get') {
+          if (cartItem.original_base_rate !== undefined) {
+            cartItem.base_rate = cartItem.original_base_rate;
+            cartItem.base_price_list_rate = cartItem.original_base_price_list_rate;
+            
+            if (this.selected_currency !== this.pos_profile.currency) {
+              cartItem.rate = this.flt(cartItem.base_rate / this.exchange_rate, this.currency_precision);
+              cartItem.price_list_rate = this.flt(cartItem.base_price_list_rate / this.exchange_rate, this.currency_precision);
+            } else {
+              cartItem.rate = cartItem.base_rate;
+              cartItem.price_list_rate = cartItem.base_price_list_rate;
+            }
+            
+            cartItem.discount_percentage = 0;
+            cartItem.discount_amount = 0;
+            cartItem.base_discount_amount = 0;
+            
+            cartItem.original_base_rate = null;
+            cartItem.original_base_price_list_rate = null;
+            cartItem.original_rate = null;
+            cartItem.original_price_list_rate = null;
+          }
+        }
+        
+        const updated_offers = item_offers.filter(id => id !== offer.row_id);
+        cartItem.posa_offers = JSON.stringify(updated_offers);
+        
+        if (updated_offers.length === 0) {
+          cartItem.posa_offer_applied = 0;
+        }
+        
+        cartItem.buy_get_offer_applied = null;
+        cartItem.buy_get_offer_role = null;
+        
+        cartItem.amount = this.flt(cartItem.qty * cartItem.rate, this.currency_precision);
+        cartItem.base_amount = this.flt(cartItem.qty * cartItem.base_rate, this.currency_precision);
+        
+        const taxRate = cartItem.rate < this.pos_profile.custom_tax_limit ? 5 : 12;
+        constINSTALL = taxRate === 5 ? 
+          +(cartItem.rate * (taxRate / 105)).toFixed(2) : 
+          +(cartItem.rate * (taxRate / 112)).toFixed(2);
+        const preTaxRate = taxRate === 5 ? 
+          +((cartItem.rate * 100)/105).toFixed(2) : 
+          +((cartItem.rate * 100)/112).toFixed(2);
+        
+        cartItem.tax_rate = taxRate;
+        cartItem.tax = tax.toFixed(2);
+        cartItem.pre_tax_rate = preTaxRate.toFixed(2);
+        cartItem.b_amount = (preTaxRate * cartItem.qty).toFixed(2);
+      }
+    });
+    
+    this.$forceUpdate();
+  },
+
     applyNewOffer(offer) {
       if (offer.apply_on === "Buy Get Free") {
           this.ApplyBuyGetFreeOffer(offer);
@@ -4095,6 +4142,7 @@ RemoveBuyGetFreeOffer(offer) {
               const base_discount = this.flt((base_price * offer.discount_percentage) / 100, this.currency_precision);
               item.base_discount_amount = base_discount;
               item.base_rate = this.flt(base_price - base_discount, this.currency_precision);
+              item.base_price_list_rate = base_price;
 
               // Convert to selected currency if needed
               if (this.selected_currency !== this.pos_profile.currency) {
@@ -4155,6 +4203,8 @@ RemoveBuyGetFreeOffer(offer) {
 
     RemoveOnPrice(offer) {
       console.log('Removing price offer:', offer);
+      if (!offer || !Array.isArray(this.items)) return;
+      
       this.items.forEach((item) => {
         const item_offers = JSON.parse(item.posa_offers);
         if (item_offers.includes(offer.row_id)) {
@@ -4507,6 +4557,20 @@ RemoveBuyGetFreeOffer(offer) {
         console.log('Updating currency exchange rate...');
         console.log('Selected:', currency, 'Base:', this.pos_profile.currency, 'Date:', this.posting_date);
         
+        // First ensure base rates exist for all items
+        this.items.forEach(item => {
+          if (!item.base_rate) {
+            // Store original rates in base currency before switching
+            item.base_rate = item.rate;
+            item.base_price_list_rate = item.price_list_rate;
+            item.base_discount_amount = item.discount_amount || 0;
+            console.log(`Stored base rates for ${item.item_code}:`, {
+              base_rate: item.base_rate,
+              base_price_list_rate: item.base_price_list_rate
+            });
+          }
+        });
+        
         // Get rate from selected to base currency
         const response = await frappe.call({
           method: "erpnext.setup.utils.get_exchange_rate",
@@ -4536,9 +4600,12 @@ RemoveBuyGetFreeOffer(offer) {
             this.available_currencies[currencyIndex].rate = rate;
           }
           
-          // Update all item rates based on new exchange rate
+          // Force update of all items immediately
           this.update_item_rates();
-
+          
+          // Log updated items for debugging
+          console.log(`Updated all ${this.items.length} items to currency ${currency} with rate ${rate}`);
+          
           // Show success message
           this.eventBus.emit("show_message", {
             title: __(`Exchange rate updated: 1 ${currency} = ${this.flt(rate, 6)} ${this.pos_profile.currency}`),
@@ -4565,6 +4632,9 @@ RemoveBuyGetFreeOffer(offer) {
           this.available_currencies[currencyIndex].title = currency;
           this.available_currencies[currencyIndex].rate = null;
         }
+        
+        // Restore all items to base currency rates
+        this.update_item_rates();
         
         this.eventBus.emit("show_message", {
           title: __(`Error: Could not fetch exchange rate from ${currency} to ${this.pos_profile.currency}. Please set up the exchange rate first.`),
@@ -4759,7 +4829,7 @@ RemoveBuyGetFreeOffer(offer) {
       // For base currency or when multi-currency is disabled, round to nearest integer
       return Math.round(amount);
     },
-   
+
     // Increase quantity of an item (handles return logic)
     add_one(item) {
       // For returns, we need to add (make more negative)
@@ -4801,6 +4871,8 @@ RemoveBuyGetFreeOffer(offer) {
       this.pos_opening_shift = data.pos_opening_shift;
       this.stock_settings = data.stock_settings;
       // Increase precision for better handling of small amounts
+      this.float_precision = 6;  // Changed from 2 to 6
+      this.currency_precision = 6;  // Changed from 2 to 6
       this.invoiceType = this.pos_profile.posa_default_sales_order
         ? "Order"
         : "Invoice";
