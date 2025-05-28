@@ -24,6 +24,78 @@
       </v-card>
     </v-dialog>
 
+    <!-- Add this Reference Dialog after your existing cancel dialog -->
+<!-- Reference Details Dialog -->
+<v-dialog v-model="reference_dialog" max-width="500" persistent>
+  <v-card>
+    <v-card-title class="text-h5 bg-primary white--text">
+      <v-icon left color="white">mdi-file-document-edit</v-icon>
+      {{ __("Enter Reference Details") }}
+    </v-card-title>
+    
+    <v-card-text class="pt-6 pb-2">
+      <v-container>
+        <v-row>
+          <v-col cols="12">
+            <v-text-field
+              v-model="reference_no"
+              :label="__('Reference Number')"
+              variant="outlined"
+              density="compact"
+              color="primary"
+              prepend-inner-icon="mdi-numeric"
+              :rules="[v => !!v || __('Reference Number is required')]"
+              required
+              hide-details="auto"
+              autocomplete="off" 
+              class="mb-3"
+            ></v-text-field>
+          </v-col>
+          
+          <v-col cols="12">
+            <v-text-field
+              v-model="reference_name"
+              :label="__('Reference Name')"
+              variant="outlined"
+              density="compact"
+              color="primary"
+              prepend-inner-icon="mdi-account"
+              :rules="[v => !!v || __('Reference Name is required')]"
+              required
+              hide-details="auto"
+              autocomplete="off" 
+            ></v-text-field>
+          </v-col>
+        </v-row>
+      </v-container>
+    </v-card-text>
+
+    <v-card-actions class="px-6 pb-4">
+      <v-spacer></v-spacer>
+      
+      <v-btn
+        color="grey"
+        variant="outlined"
+        @click="cancel_reference_dialog"
+        prepend-icon="mdi-close"
+      >
+        {{ __("Cancel") }}
+      </v-btn>
+      
+      <v-btn
+        color="primary"
+        variant="elevated"
+        @click="confirm_reference_and_proceed"
+        prepend-icon="mdi-credit-card"
+        :disabled="!reference_no || !reference_name"
+        class="ml-3"
+      >
+        {{ __("Proceed to Payment") }}
+      </v-btn>
+    </v-card-actions>
+  </v-card>
+</v-dialog>
+
     <!-- Main Invoice Card (contains all invoice content) -->
     <v-card style="max-height: 70vh; height: 70vh"
       :class="['cards my-0 py-0 mt-3 bg-grey-lighten-5', { 'return-mode': invoiceType === 'Return' }]">
@@ -448,6 +520,9 @@ export default {
       pos_opening_shift: "",
       stock_settings: "",
       invoice_doc: "",
+      reference_dialog: false,
+      reference_no: '',
+      reference_name: '',
       return_doc: "",
       customer: "",
       customer_info: "",
@@ -1821,6 +1896,22 @@ add_free_item(item) {
           return;
         }
 
+          // Check if reference details are required
+      if (this.pos_profile.custom_add_reference_details) {
+        console.log('Reference details required - showing dialog');
+        this.reference_no = '';
+      this.reference_name = '';
+        this.reference_dialog = true;
+        
+        return;
+      }
+  
+
+      // If no reference required, proceed directly to payment
+      await this.process_payment();
+
+
+
         // Update invoice_doc with current currency info
         invoice_doc.currency = this.selected_currency || this.pos_profile.currency;
         invoice_doc.conversion_rate = this.exchange_rate || 1;
@@ -1890,7 +1981,138 @@ add_free_item(item) {
         });
       }
     },
+    
 
+
+// Add this new method to handle the payment processing
+async process_payment() {
+  try {
+    let invoice_doc;
+    if (this.invoice_doc.doctype == "Sales Order") {
+      console.log('Processing Sales Order payment');
+      invoice_doc = await this.process_invoice_from_order();
+    } else {
+      console.log('Processing regular invoice');
+      invoice_doc = this.process_invoice();
+    }
+
+    if (!invoice_doc) {
+      console.log('Failed to process invoice');
+      return;
+    }
+
+    // Add reference details to invoice if provided
+    if (this.reference_no || this.reference_name) {
+      invoice_doc.custom_reference_no = this.reference_no;
+      invoice_doc.custom_reference_name = this.reference_name;
+    }
+
+    // Update invoice_doc with current currency info
+    invoice_doc.currency = this.selected_currency || this.pos_profile.currency;
+    invoice_doc.conversion_rate = this.exchange_rate || 1;
+    
+    // Update totals in invoice_doc to match current calculations
+    invoice_doc.total = this.Total;
+    invoice_doc.grand_total = this.subtotal;
+    
+    // Apply rounding to get rounded total
+    invoice_doc.rounded_total = this.roundAmount(this.subtotal);
+    invoice_doc.base_total = this.Total * (1 / this.exchange_rate || 1);
+    invoice_doc.base_grand_total = this.subtotal * (1 / this.exchange_rate || 1);
+    invoice_doc.base_rounded_total = this.roundAmount(invoice_doc.base_grand_total);
+    
+    // Check if this is a return invoice
+    if (this.invoiceType === 'Return' || invoice_doc.is_return) {
+      console.log('Preparing RETURN invoice for payment with:', {
+        is_return: invoice_doc.is_return,
+        invoiceType: this.invoiceType,
+        return_against: invoice_doc.return_against,
+        items: invoice_doc.items.length,
+        grand_total: invoice_doc.grand_total
+      });
+      
+      // For return invoices, explicitly ensure all amounts are negative
+      invoice_doc.is_return = 1;
+      if (invoice_doc.grand_total > 0) invoice_doc.grand_total = -Math.abs(invoice_doc.grand_total);
+      if (invoice_doc.rounded_total > 0) invoice_doc.rounded_total = -Math.abs(invoice_doc.rounded_total);
+      if (invoice_doc.total > 0) invoice_doc.total = -Math.abs(invoice_doc.total);
+      if (invoice_doc.base_grand_total > 0) invoice_doc.base_grand_total = -Math.abs(invoice_doc.base_grand_total);
+      if (invoice_doc.base_rounded_total > 0) invoice_doc.base_rounded_total = -Math.abs(invoice_doc.base_rounded_total);
+      if (invoice_doc.base_total > 0) invoice_doc.base_total = -Math.abs(invoice_doc.base_total);
+      
+      // Ensure all items have negative quantity and amount
+      if (invoice_doc.items && invoice_doc.items.length) {
+        invoice_doc.items.forEach(item => {
+          if (item.qty > 0) item.qty = -Math.abs(item.qty);
+          if (item.stock_qty > 0) item.stock_qty = -Math.abs(item.stock_qty);
+          if (item.amount > 0) item.amount = -Math.abs(item.amount);
+        });
+      }
+    }
+    
+    // Get payments with correct sign (positive/negative)
+    invoice_doc.payments = this.get_payments();
+    console.log('Final payment data:', invoice_doc.payments);
+
+    // Double-check return invoice payments are negative
+    if ((this.invoiceType === 'Return' || invoice_doc.is_return) && invoice_doc.payments.length) {
+      invoice_doc.payments.forEach(payment => {
+        if (payment.amount > 0) payment.amount = -Math.abs(payment.amount);
+        if (payment.base_amount > 0) payment.base_amount = -Math.abs(payment.base_amount);
+      });
+      console.log('Ensured negative payment amounts for return:', invoice_doc.payments);
+    }
+
+    console.log('Showing payment dialog with currency:', invoice_doc.currency);
+    this.eventBus.emit("show_payment", "true");
+    this.eventBus.emit("send_invoice_doc_payment", invoice_doc);
+
+  } catch (error) {
+    console.error('Error in process_payment:', error);
+    this.eventBus.emit("show_message", {
+      title: __("Error processing payment"),
+      color: "error",
+      message: error.message
+    });
+  }
+},
+
+// Add this new method to handle reference dialog confirmation
+async confirm_reference_and_proceed() {
+  try {
+    // Validate reference fields if required
+    if (this.pos_profile.custom_add_reference_details) {
+      if (!this.reference_no || !this.reference_name) {
+        this.eventBus.emit("show_message", {
+          title: __("Please fill in both reference number and reference name"),
+          color: "error"
+        });
+        return;
+      }
+    }
+
+    // Close the reference dialog
+    this.reference_dialog = false;
+
+    // Proceed with payment processing
+    await this.process_payment();
+
+  } catch (error) {
+    console.error('Error in confirm_reference_and_proceed:', error);
+    this.eventBus.emit("show_message", {
+      title: __("Error processing reference details"),
+      color: "error",
+      message: error.message
+    });
+  }
+},
+
+// Add this method to handle reference dialog cancellation
+cancel_reference_dialog() {
+  this.reference_dialog = false;
+  this.reference_no = '';
+  this.reference_name = '';
+},
     // Validate invoice before payment/submit (return logic, quantity, rates, etc)
     async validate() {
       console.log('Starting return validation');
