@@ -761,11 +761,6 @@ export default {
       });
     }
 
-    if (!isFreeItem) {
-      this.$nextTick(() => {
-        this.processBuyGetOffers(new_item);
-      });
-    }
 
   } else {
     const cur_item = this.items[index];
@@ -822,11 +817,6 @@ export default {
     console.log("Tax values set for item:", b_amount);
     // ===========================================
 
-    if (!isFreeItem && !cur_item.posa_is_offer) {
-      this.$nextTick(() => {
-        this.processBuyGetOffers(cur_item);
-      });
-    }
   }
 
   this.$forceUpdate();
@@ -839,173 +829,7 @@ export default {
 },
 
 
-processBuyGetOffers(addedItem) {
-  // Skip if no offers or no valid item
-  if (!this.posOffers || this.posOffers.length === 0 || !addedItem) {
-    return;
-  }
-  
-  console.log(`Processing Buy-Get offers for added item: ${addedItem.item_code}`);
-  
-  // Find all Buy-Get Free offers
-  const buyGetOffers = this.posOffers.filter(offer => 
-    offer.apply_on === "Buy Get Free"
-  );
-  
-  if (buyGetOffers.length === 0) {
-    console.log("No Buy-Get offers available");
-    return;
-  }
-  
-  // For each offer, check if the added item is in the rule items
-  buyGetOffers.forEach(offer => {
-    // Extract all item codes from the rule_item_code table
-    const offerItemCodes = Array.isArray(offer.rule_item_code) ? 
-      offer.rule_item_code.map(rule => rule.item_code) : [];
-    
-    // If no rule items defined, skip this offer
-    if (offerItemCodes.length === 0) {
-      console.log(`Offer ${offer.name} has no rule items`);
-      return;
-    }
-    
-    // Check if the added item is part of this offer
-    if (!offerItemCodes.includes(addedItem.item_code)) {
-      console.log(`Item ${addedItem.item_code} not in offer's rule items`);
-      return;
-    }
-    
-    console.log(`Item ${addedItem.item_code} is part of offer ${offer.name}`);
-    
-    // Get min_buy and max_get values
-    const min_buy = parseInt(offer.min_buy_quantity) || 1;
-    const max_get = parseInt(offer.max_get_quantity) || 1;
-    
-    // Find all items in the cart that are part of this offer
-    const offerItemsInCart = this.items.filter(item => 
-      offerItemCodes.includes(item.item_code) && !item.posa_is_offer
-    );
-    
-    // If we have at least 2 different item types
-    const uniqueItemCodes = new Set(offerItemsInCart.map(item => item.item_code));
-    if (uniqueItemCodes.size >= 2) {
-      console.log(`Found ${uniqueItemCodes.size} different item types in cart from this offer`);
-      
-      // No need to add items - the existing offer system will handle this
-      console.log("Multiple offer items in cart - will be handled by regular offer system");
-    } else {
-      // We have only one type of item from the offer in the cart
-      console.log("Only one offer item type in cart, may need to add complementary items");
-      
-      // Group cart items by code and calculate totals
-      const itemsByCode = {};
-      offerItemsInCart.forEach(item => {
-        if (!itemsByCode[item.item_code]) {
-          itemsByCode[item.item_code] = {
-            items: [],
-            total_qty: 0,
-            price: parseFloat(item.price_list_rate)
-          };
-        }
-        
-        itemsByCode[item.item_code].items.push(item);
-        itemsByCode[item.item_code].total_qty += parseFloat(item.qty);
-      });
-      
-      // Get the current item code and quantity
-      const currentItemCode = Object.keys(itemsByCode)[0];
-      const currentQty = itemsByCode[currentItemCode].total_qty;
-      const currentPrice = itemsByCode[currentItemCode].price;
-      
-      console.log(`Current item: ${currentItemCode}, Qty: ${currentQty}, Price: ${currentPrice}`);
-      
-      // Calculate how many free items can be given
-      const numSets = Math.floor(currentQty / min_buy);
-      const freeQtyAllowed = numSets * max_get;
-      
-      console.log(`Sets: ${numSets}, Free items allowed: ${freeQtyAllowed}`);
-      
-      // Only proceed if we have enough items to qualify for free items
-      if (numSets > 0 && freeQtyAllowed > 0) {
-        console.log("Calculating which items to add...");
-        
-        // Find other items in the offer that aren't in the cart
-        const otherOfferItemCodes = offerItemCodes.filter(code => code !== currentItemCode);
-        
-        // If there are other items in the offer
-        if (otherOfferItemCodes.length > 0) {
-          console.log(`Found ${otherOfferItemCodes.length} other items in offer`);
-          
-          // Find details for these other items
-          const otherItemDetails = [];
-          
-          for (const itemCode of otherOfferItemCodes) {
-            const itemDetails = this.allItems.find(item => item.item_code === itemCode);
-            
-            if (itemDetails) {
-              otherItemDetails.push({
-                item_code: itemCode,
-                price: parseFloat(itemDetails.price_list_rate),
-                details: itemDetails
-              });
-            }
-          }
-          
-          // Sort other items by price (lowest first)
-          otherItemDetails.sort((a, b) => a.price - b.price);
-          
-          console.log("Other offer items by price (lowest first):", 
-            otherItemDetails.map(i => `${i.item_code}: ${i.price}`).join(', '));
-          
-          // Compare prices to determine which items to add
-          // If current item is more expensive than the cheapest other item, add the cheapest
-          if (otherItemDetails.length > 0 && currentPrice > otherItemDetails[0].price) {
-            const cheapestItem = otherItemDetails[0];
-            console.log(`Current item ${currentItemCode} (${currentPrice}) is more expensive than ${cheapestItem.item_code} (${cheapestItem.price})`);
-            console.log(`Adding ${freeQtyAllowed} free ${cheapestItem.item_code} items`);
-            
-            // Add the cheapest item as free
-            const freeItem = { ...cheapestItem.details };
-            freeItem.qty = freeQtyAllowed;
-            freeItem.free_from_offer = offer.name;
-            freeItem.free_from_buy_item = currentItemCode;
-            freeItem.posa_is_offer = 1;
-            freeItem.is_free_item = 1;
-            
-            // Add to cart
-            this.add_free_item(freeItem);
-            
-            // Show message to user
-            this.eventBus.emit("show_message", {
-              title: __(`Added ${freeQtyAllowed} free ${cheapestItem.details.item_name || cheapestItem.item_code} to your cart`),
-              color: "success",
-            });
-          }
-          // If current item is cheaper than all other items, consider this the "free" item
-          else if (otherItemDetails.length > 0 && currentPrice <= otherItemDetails[0].price) {
-            console.log(`Current item ${currentItemCode} (${currentPrice}) is cheaper than other offer items`);
-            
-            // The current item will be marked as "free" by the offer system
-            // But we need specific handling for quantities
-            
-            // Calculate how many should be free based on min_buy and max_get
-            if (currentQty > min_buy) {
-              console.log(`${min_buy} of ${currentQty} ${currentItemCode} will be paid, ${Math.min(max_get, currentQty - min_buy)} will be free`);
-              // This will be handled by the regular offer system
-            }
-          }
-        }
-      } else {
-        console.log("Not enough quantity to qualify for free items");
-      }
-    }
-  });
-  
-  // Re-process all offers after adding free items
-  this.$nextTick(() => {
-    this.handelOffers();
-  });
-},
+
 
 add_free_item(item) {
   if (!item.uom) {
