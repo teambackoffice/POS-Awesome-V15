@@ -258,7 +258,10 @@ fixtures = [
                     "POS Profile-posa_allow_reconcile_payments",
                     "POS Profile-column_break_uolvm",
                     "POS Profile-posa_allow_mpesa_reconcile_payments",
-                    "POS Profile-custom_product_bundle"
+                    "POS Profile-custom_product_bundle",
+                    "Sales Invoice-custom_reference_no",
+                    "Sales Invoice-custom_reference_name",
+                    "POS Profile-custom_add_reference_details"
                 ),
             ]
         ],
