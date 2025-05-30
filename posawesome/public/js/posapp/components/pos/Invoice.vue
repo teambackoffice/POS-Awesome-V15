@@ -476,7 +476,6 @@ export default {
       activeBuyGetOffers: [],
       offerEligibleItems: {},
       offerEvaluationTimeout: null,
-      itemPriceCache: new Map(),
       OFFER_STORAGE_KEY: 'pos_buyget_offers_v2',
       items_headers: [
         // Table headers for items
@@ -2843,45 +2842,52 @@ export default {
       }
       return applied;
     },
+    updateOfferDisplayList() {
+  const applicableOffers = [];
+  
+  // Re-evaluate all offers to build the display list
+  this.posOffers.forEach((offer) => {
+    if (!this.checkOfferCoupon(offer)) return;
+    
+    let applicableOffer = null;
+    
+    switch(offer.apply_on) {
+      case "Item Code":
+        applicableOffer = this.getItemOffer(offer);
+        break;
+      case "Buy Get Free":
+        applicableOffer = this.getItemBuyGetFree(offer);
+        break;
+      case "Item Group":
+        applicableOffer = this.getGroupOffer(offer);
+        break;
+      case "Brand":
+        applicableOffer = this.getBrandOffer(offer);
+        break;
+      case "Transaction":
+        applicableOffer = this.getTransactionOffer(offer);
+        break;
+    }
+    
+    if (applicableOffer) {
+      applicableOffers.push(applicableOffer);
+    }
+  });
 
-    handelOffers() {
-      const offers = [];
+  // Process any additional offer logic
+  this.setItemGiveOffer(applicableOffers);
+  
+  // Update the POS offer display
+  this.updatePosOffers(applicableOffers);
+  
+  console.log(`📊 Found ${applicableOffers.length} applicable offers`);
+},
 
-      this.posOffers.forEach((offer) => {
-        if (offer.apply_on === "Item Code") {
-          const itemOffer = this.getItemOffer(offer);
-          if (itemOffer) {
-            offers.push(itemOffer);
-          }
-        } else if (offer.apply_on === "Buy Get Free") {
-          const buyGetOffer = this.getItemBuyGetFree(offer);
-          if (buyGetOffer) {
-            offers.push(buyGetOffer);
-          }
-        } else if (offer.apply_on === "Item Group") {
-          const groupOffer = this.getGroupOffer(offer);
-          if (groupOffer) {
-            offers.push(groupOffer);
-          }
-        } else if (offer.apply_on === "Brand") {
-          const brandOffer = this.getBrandOffer(offer);
-          if (brandOffer) {
-            offers.push(brandOffer);
-          }
-        } else if (offer.apply_on === "Transaction") {
-          const transactionOffer = this.getTransactionOffer(offer);
-          if (transactionOffer) {
-            offers.push(transactionOffer);
-          }
-        }
-      });
 
-      // Process offers that need special handling
-      this.setItemGiveOffer(offers);
-
-      // Update the offers in the POS
-      this.updatePosOffers(offers);
-    },
+handelOffers() {
+  // Just call the comprehensive re-evaluation
+  this.reEvaluateActiveOffers();
+},
 
     setItemGiveOffer(offers) {
       // Set item give offer for replace
@@ -3124,228 +3130,6 @@ export default {
       }
 
       return apply_offer;
-    },
-
-    calculateOptimalPairing(offer, eligibleItems, buyQty, getQty) {
-      console.log('🔄 Calculating optimal pairing...');
-
-      // Create a flattened list of individual items with their quantities
-      const individualItems = [];
-      eligibleItems.forEach(cartItem => {
-        const qty = Math.abs(parseFloat(cartItem.qty || 0));
-        const rate = parseFloat(cartItem.price_list_rate || cartItem.rate || 0);
-
-        // Add individual units to the array
-        for (let i = 0; i < qty; i++) {
-          individualItems.push({
-            cart_item: cartItem,
-            item_code: cartItem.item_code,
-            rate: rate,
-            row_id: cartItem.posa_row_id,
-            unit_index: i
-          });
-        }
-      });
-
-      console.log(`📊 Individual items (${individualItems.length} units):`,
-        individualItems.map(item => `${item.item_code}($${item.rate})`)
-      );
-
-      const totalUnits = individualItems.length;
-      const unitsPerSet = buyQty + getQty;
-
-      if (totalUnits < unitsPerSet) {
-        console.log(`❌ Need ${unitsPerSet} units, have ${totalUnits}`);
-        return { canApply: false };
-      }
-
-      // Sort all individual units by price (ascending - cheapest first)
-      const sortedUnits = individualItems.sort((a, b) => a.rate - b.rate);
-
-      console.log(`🔀 Sorted units by price:`,
-        sortedUnits.map(item => `${item.item_code}($${item.rate})`)
-      );
-
-      // Calculate how many complete sets we can make
-      const totalSets = Math.floor(totalUnits / unitsPerSet);
-      console.log(`📈 Can make ${totalSets} complete sets`);
-
-      if (totalSets === 0) {
-        return { canApply: false };
-      }
-
-      // Apply optimal pairing algorithm
-      const pairs = this.createOptimalPairs(sortedUnits, totalSets, buyQty, getQty);
-      console.log(`🎯 Created ${pairs.length} pairs`);
-
-      // Convert pairs back to cart item format
-      const result = this.convertPairsToCartItems(pairs, eligibleItems);
-
-      return {
-        canApply: true,
-        totalPairs: pairs.length,
-        totalSavings: result.totalSavings,
-        buyItems: result.buyItems,
-        getItems: result.getItems
-      };
-    },
-    createOptimalPairs(sortedUnits, totalSets, buyQty, getQty) {
-      const pairs = [];
-      let remainingUnits = [...sortedUnits];
-
-      for (let setIndex = 0; setIndex < totalSets; setIndex++) {
-        console.log(`\n🔧 Creating set ${setIndex + 1}:`);
-
-        // For each set, take the cheapest available units for FREE
-        const freeUnits = remainingUnits.splice(0, getQty);
-
-        // And take some units for PAID (we'll optimize this selection)
-        const paidUnits = this.selectPaidUnits(remainingUnits, buyQty, freeUnits);
-
-        // Remove selected paid units from remaining
-        paidUnits.forEach(paidUnit => {
-          const index = remainingUnits.findIndex(unit =>
-            unit.cart_item.posa_row_id === paidUnit.cart_item.posa_row_id &&
-            unit.unit_index === paidUnit.unit_index
-          );
-          if (index >= 0) {
-            remainingUnits.splice(index, 1);
-          }
-        });
-
-        const pair = {
-          set_number: setIndex + 1,
-          free_units: freeUnits,
-          paid_units: paidUnits,
-          savings: freeUnits.reduce((sum, unit) => sum + unit.rate, 0)
-        };
-
-        pairs.push(pair);
-
-        console.log(`  FREE: ${freeUnits.map(u => `${u.item_code}($${u.rate})`).join(', ')}`);
-        console.log(`  PAID: ${paidUnits.map(u => `${u.item_code}($${u.rate})`).join(', ')}`);
-        console.log(`  SAVINGS: $${pair.savings}`);
-      }
-
-      return pairs;
-    },
-    convertPairsToCartItems(pairs, eligibleItems) {
-      const buyItems = [];
-      const getItems = [];
-      let totalSavings = 0;
-
-      // Group units by cart item for easier processing
-      const cartItemAllocations = new Map();
-
-      pairs.forEach(pair => {
-        // Process FREE units
-        pair.free_units.forEach(unit => {
-          const key = unit.cart_item.posa_row_id;
-          if (!cartItemAllocations.has(key)) {
-            cartItemAllocations.set(key, {
-              cart_item: unit.cart_item,
-              free_qty: 0,
-              paid_qty: 0
-            });
-          }
-          cartItemAllocations.get(key).free_qty += 1;
-          totalSavings += unit.rate;
-        });
-
-        // Process PAID units
-        pair.paid_units.forEach(unit => {
-          const key = unit.cart_item.posa_row_id;
-          if (!cartItemAllocations.has(key)) {
-            cartItemAllocations.set(key, {
-              cart_item: unit.cart_item,
-              free_qty: 0,
-              paid_qty: 0
-            });
-          }
-          cartItemAllocations.get(key).paid_qty += 1;
-        });
-      });
-
-      // Convert allocations to buy/get items format
-      cartItemAllocations.forEach((allocation, cartItemId) => {
-        const cartItem = allocation.cart_item;
-        const totalQty = Math.abs(parseFloat(cartItem.qty));
-        const rate = parseFloat(cartItem.price_list_rate || cartItem.rate);
-
-        // Create GET item if there are free quantities
-        if (allocation.free_qty > 0) {
-          getItems.push({
-            item_code: cartItem.item_code,
-            row_id: cartItem.posa_row_id,
-            quantity: totalQty,
-            free_qty: allocation.free_qty,
-            rate: rate,
-            amount: totalQty * rate,
-            role: 'get',
-            savings: allocation.free_qty * rate
-          });
-        }
-
-        // Create BUY item if there are paid quantities OR if item participates in offer
-        if (allocation.paid_qty > 0 || allocation.free_qty > 0) {
-          buyItems.push({
-            item_code: cartItem.item_code,
-            row_id: cartItem.posa_row_id,
-            quantity: totalQty,
-            allocated_buy_qty: allocation.paid_qty,
-            rate: rate,
-            amount: totalQty * rate,
-            role: 'buy'
-          });
-        }
-      });
-
-      console.log(`💰 Total savings: $${totalSavings}`);
-      console.log(`📦 Buy items: ${buyItems.length}, Get items: ${getItems.length}`);
-
-      return {
-        buyItems,
-        getItems,
-        totalSavings
-      };
-    },
-    selectPaidUnits(availableUnits, buyQty, freeUnits) {
-      // Strategy: Try to avoid taking units of the same item that we're making free
-      // This prevents the same item from being both free and paid
-
-      const freeItemCodes = new Set(freeUnits.map(unit => unit.item_code));
-
-      // First, try to select paid units from different items
-      const differentItemUnits = availableUnits.filter(unit =>
-        !freeItemCodes.has(unit.item_code)
-      );
-
-      const paidUnits = [];
-
-      // Take from different items first
-      let taken = 0;
-      for (const unit of differentItemUnits) {
-        if (taken >= buyQty) break;
-        paidUnits.push(unit);
-        taken++;
-      }
-
-      // If we still need more, take from any available units
-      if (taken < buyQty) {
-        const remainingNeeded = buyQty - taken;
-        const otherUnits = availableUnits.filter(unit =>
-          !paidUnits.some(paid =>
-            paid.cart_item.posa_row_id === unit.cart_item.posa_row_id &&
-            paid.unit_index === unit.unit_index
-          )
-        );
-
-        for (let i = 0; i < remainingNeeded && i < otherUnits.length; i++) {
-          paidUnits.push(otherUnits[i]);
-        }
-      }
-
-      return paidUnits;
     },
     getGroupOffer(offer) {
       let apply_offer = null;
@@ -3603,54 +3387,210 @@ export default {
     },
 
     reEvaluateActiveOffers() {
-      if (this.offerEvaluationTimeout) {
-        clearTimeout(this.offerEvaluationTimeout);
+  if (this.offerEvaluationTimeout) {
+    clearTimeout(this.offerEvaluationTimeout);
+  }
+
+  this.offerEvaluationTimeout = setTimeout(() => {
+    console.log('\n🔄 === COMPREHENSIVE OFFER RE-EVALUATION ===');
+    
+    // Get ALL types of offers that need re-evaluation
+    const allApplicableOffers = this.posOffers.filter(offer => 
+      this.checkOfferCoupon(offer)
+    );
+
+    if (allApplicableOffers.length === 0) {
+      console.log('ℹ️ No offers to evaluate');
+      return;
+    }
+
+    // Group offers by type for proper processing order
+    const offersByType = {
+      'Buy Get Free': [],
+      'Item Code': [],
+      'Item Group': [],
+      'Brand': [],
+      'Transaction': []
+    };
+
+    allApplicableOffers.forEach(offer => {
+      if (offersByType[offer.apply_on]) {
+        offersByType[offer.apply_on].push(offer);
+      }
+    });
+
+    // Process offers in order (Buy Get Free first as they're most complex)
+    this.processOffersByType(offersByType);
+
+    console.log('✅ === COMPREHENSIVE RE-EVALUATION COMPLETED ===\n');
+  }, 50);
+},
+processOffersByType(offersByType) {
+  // Step 1: Clean ALL offer traces first
+  this.cleanAllOfferTraces();
+
+  // Step 2: Process each offer type in sequence
+  setTimeout(() => {
+    // Process Buy Get Free offers first
+    offersByType['Buy Get Free'].forEach(offer => {
+      try {
+        console.log(`🎯 Processing Buy-Get offer: ${offer.name}`);
+        const updatedOffer = this.getItemBuyGetFree(offer);
+        if (updatedOffer) {
+          this.ApplyBuyGetFreeOffer(updatedOffer);
+        }
+      } catch (error) {
+        console.error(`❌ Error processing Buy-Get offer ${offer.name}:`, error);
+      }
+    });
+
+    // Process other offer types
+    const otherOfferTypes = ['Item Code', 'Item Group', 'Brand', 'Transaction'];
+    otherOfferTypes.forEach(offerType => {
+      offersByType[offerType].forEach(offer => {
+        try {
+          console.log(`🎯 Processing ${offerType} offer: ${offer.name}`);
+          let applicableOffer = null;
+          
+          switch(offerType) {
+            case 'Item Code':
+              applicableOffer = this.getItemOffer(offer);
+              break;
+            case 'Item Group':
+              applicableOffer = this.getGroupOffer(offer);
+              break;
+            case 'Brand':
+              applicableOffer = this.getBrandOffer(offer);
+              break;
+            case 'Transaction':
+              applicableOffer = this.getTransactionOffer(offer);
+              break;
+          }
+
+          if (applicableOffer) {
+            this.applyStandardOffer(applicableOffer);
+          }
+        } catch (error) {
+          console.error(`❌ Error processing ${offerType} offer ${offer.name}:`, error);
+        }
+      });
+    });
+
+    // Final step: Update offer list and UI
+    this.updateOfferDisplayList();
+  }, 100);
+},
+cleanAllOfferTraces() {
+  console.log('🧹 Cleaning all offer traces...');
+  
+  this.items.forEach(item => {
+    // Store original rates if not already stored
+    if (!item.original_rate && item.posa_offer_applied) {
+      console.warn(`Item ${item.item_code} has offers but no original rate stored`);
+    }
+
+    // Clear all offer-related fields
+    if (item.posa_offer_applied) {
+      // Restore original rates if available
+      if (item.original_rate !== undefined) {
+        item.rate = item.original_rate;
+        item.price_list_rate = item.original_price_list_rate || item.price_list_rate;
+        item.base_rate = item.original_base_rate || item.base_rate;
+        item.base_price_list_rate = item.original_base_price_list_rate || item.base_price_list_rate;
       }
 
-      this.offerEvaluationTimeout = setTimeout(() => {
-        console.log('\n🔄 === ENHANCED RE-EVALUATION WITH FORCE CLEANUP ===');
+      // Clear discount fields
+      item.discount_percentage = 0;
+      item.discount_amount = 0;
+      item.base_discount_amount = 0;
 
-        const buyGetOffers = this.posOffers.filter(offer =>
-          offer.apply_on === "Buy Get Free" && this.checkOfferCoupon(offer)
-        );
+      // Clear offer tracking fields
+      item.posa_offer_applied = 0;
+      item.buy_get_offer_applied = null;
+      item.buy_get_offer_role = null;
+      item.buy_get_savings = 0;
+      item.posa_offers = JSON.stringify([]);
 
-        if (buyGetOffers.length === 0) {
-          console.log('ℹ️ No Buy-Get offers to evaluate');
-          return;
-        }
+      // Clear original rate storage
+      item.original_rate = null;
+      item.original_price_list_rate = null;
+      item.original_base_rate = null;
+      item.original_base_price_list_rate = null;
 
-        buyGetOffers.forEach(offer => {
-          try {
-            console.log(`\n🎯 Processing offer: ${offer.name}`);
+      // Recalculate amounts and taxes
+      this.recalculateItemAmountsAndTaxes(item);
+    }
+  });
 
-            // STEP 1: AGGRESSIVE cleanup - remove ALL traces
-            this.forceCleanAllOfferTraces(offer);
+  // Clear applied offers list
+  this.posa_offers = [];
+  
+  // Clear global discount offer tracking
+  this.discount_percentage_offer_name = null;
 
-            // STEP 2: Wait a moment for cleanup to complete
-            setTimeout(() => {
+  console.log('✅ All offer traces cleaned');
+},
+applyStandardOffer(offer) {
+  const existingOfferIndex = this.posa_offers.findIndex(o => o.row_id === offer.row_id);
+  
+  if (existingOfferIndex >= 0) {
+    // Update existing offer
+    this.updateExistingOffer(offer, existingOfferIndex);
+  } else {
+    // Apply new offer
+    this.applyNewStandardOffer(offer);
+  }
+},
+updateExistingOffer(offer, existingIndex) {
+  const existingOffer = this.posa_offers[existingIndex];
+  console.log(`🔄 Updating existing offer: ${offer.name}`);
+  
+  // Update the offer data
+  existingOffer.items = JSON.stringify(offer.items);
+  
+  if (existingOffer.offer === "Item Price") {
+    this.ApplyOnPrice(offer);
+  } else if (existingOffer.offer === "Grand Total") {
+    this.ApplyOnTotal(offer);
+  }
+  // Add other offer type updates as needed
+  
+  this.addOfferToItems(existingOffer);
+},
 
-              // STEP 3: Fresh evaluation with clean slate
-              const updatedOffer = this.getItemBuyGetFree(offer);
+applyNewStandardOffer(offer) {
+  console.log(`✅ Applying new ${offer.apply_on} offer: ${offer.name}`);
+  
+  if (offer.offer === "Item Price") {
+    this.ApplyOnPrice(offer);
+  } else if (offer.offer === "Give Product") {
+    this.applyGiveProductOffer(offer);
+  } else if (offer.offer === "Grand Total") {
+    this.ApplyOnTotal(offer);
+  } else if (offer.offer === "Loyalty Point") {
+    this.eventBus.emit("show_message", {
+      title: __("Loyalty Point Offer Applied"),
+      color: "success",
+    });
+  }
 
-              if (updatedOffer) {
-                console.log(`✅ Applying fresh offer: ${offer.name}`);
-                this.ApplyBuyGetFreeOffer(updatedOffer);
-              } else {
-                console.log(`❌ Offer no longer applicable: ${offer.name}`);
-              }
-
-            }, 50); // Small delay to ensure cleanup completes
-
-          } catch (error) {
-            console.error(`❌ Error in enhanced re-evaluation ${offer.name}:`, error);
-          }
-        });
-
-        console.log('✅ === ENHANCED RE-EVALUATION COMPLETED ===\n');
-
-      }, 50); // Faster response
-    },
-
+  // Record the offer
+  const newOffer = {
+    offer_name: offer.name,
+    row_id: offer.row_id,
+    apply_on: offer.apply_on,
+    offer: offer.offer,
+    items: JSON.stringify(offer.items),
+    give_item: offer.give_item,
+    give_item_row_id: offer.give_item_row_id,
+    offer_applied: offer.offer_applied,
+    coupon_based: offer.coupon_based,
+    coupon: offer.coupon,
+  };
+  
+  this.posa_offers.push(newOffer);
+  this.addOfferToItems(newOffer);
+},
     forceCleanAllOfferTraces(offer) {
       console.log(`🔥 FORCE CLEANING all traces of offer: ${offer.name}`);
 
@@ -3713,76 +3653,61 @@ export default {
       // Force UI update
       this.$forceUpdate();
     },
-
-    nuclearResetAllOffers() {
-      console.log('💥 NUCLEAR RESET - Clearing ALL offer data');
-
-      // Reset every single item to clean state
-      this.items.forEach(item => {
-        // Store current values for logging
-        const beforeRate = item.rate;
-        const beforeDiscount = item.discount_percentage;
-
-        // NUCLEAR RESET - back to basics
-        item.rate = item.price_list_rate || item.rate;
-        item.base_rate = item.base_price_list_rate || item.rate;
-        item.discount_percentage = 0;
-        item.discount_amount = 0;
-        item.base_discount_amount = 0;
-        item.posa_offer_applied = 0;
-        item.buy_get_offer_applied = null;
-        item.buy_get_offer_role = null;
-        item.buy_get_savings = 0;
-        item.posa_offers = JSON.stringify([]);
-        item.original_rate = null;
-        item.original_price_list_rate = null;
-        item.original_base_rate = null;
-        item.original_base_price_list_rate = null;
-
-        // Recalculate
-        this.recalculateItemAmountsAndTaxes(item);
-
-        if (beforeDiscount > 0) {
-          console.log(`💥 Reset ${item.item_code}: ₹${beforeRate} (${beforeDiscount}%) → ₹${item.rate} (0%)`);
-        }
-      });
-
-      // Clear all applied offers
-      this.posa_offers = [];
-
-      // Force update
-      this.$forceUpdate();
-
-      console.log('💥 Nuclear reset complete - now re-evaluating offers');
-
-      // Now re-evaluate all offers with clean slate
-      setTimeout(() => {
-        const buyGetOffers = this.posOffers.filter(offer =>
-          offer.apply_on === "Buy Get Free" && this.checkOfferCoupon(offer)
-        );
-
-        buyGetOffers.forEach(offer => {
-          const freshOffer = this.getItemBuyGetFree(offer);
-          if (freshOffer) {
-            this.ApplyBuyGetFreeOffer(freshOffer);
-          }
-        });
-      }, 100);
-    },
-    manualCleanupCommand() {
-      console.log('🚨 MANUAL CLEANUP INITIATED');
-
-      // First try the nuclear reset
-      this.nuclearResetAllOffers();
-
-      // Then try normal re-evaluation
-      setTimeout(() => {
-        this.reEvaluateActiveOffers();
-      }, 200);
-
-      console.log('🚨 Manual cleanup completed');
-    },
-
+    applyGiveProductOffer(offer) {
+  let itemsRowID;
+  if (typeof offer.items === "string") {
+    itemsRowID = JSON.parse(offer.items);
+  } else {
+    itemsRowID = offer.items;
+  }
+  
+  if (offer.apply_on == "Item Code" && offer.apply_type == "Item Code" && offer.replace_item) {
+    const item = this.ApplyOnGiveProduct(offer, offer.item);
+    item.posa_is_replace = itemsRowID[0];
+    const baseItem = this.items.find((el) => el.posa_row_id == item.posa_is_replace);
+    const diffQty = baseItem.qty - offer.given_qty;
+    item.posa_is_offer = 0;
+    
+    if (diffQty <= 0) {
+      item.qty = baseItem.qty;
+      this.remove_item(baseItem);
+      item.posa_row_id = item.posa_is_replace;
+    } else {
+      baseItem.qty = diffQty;
+    }
+    
+    this.items.unshift(item);
+    offer.give_item_row_id = item.posa_row_id;
+  } else if (offer.apply_on == "Item Group" && offer.apply_type == "Item Group" && offer.replace_cheapest_item) {
+    const itemsList = [];
+    itemsRowID.forEach((row_id) => {
+      itemsList.push(this.getItemFromRowID(row_id));
+    });
+    
+    const baseItem = itemsList.find((el) => el.item_code == offer.give_item);
+    const item = this.ApplyOnGiveProduct(offer, offer.give_item);
+    item.posa_is_offer = 0;
+    item.posa_is_replace = baseItem.posa_row_id;
+    const diffQty = baseItem.qty - offer.given_qty;
+    
+    if (diffQty <= 0) {
+      item.qty = baseItem.qty;
+      this.remove_item(baseItem);
+      item.posa_row_id = item.posa_is_replace;
+    } else {
+      baseItem.qty = diffQty;
+    }
+    
+    this.items.unshift(item);
+    offer.give_item_row_id = item.posa_row_id;
+  } else {
+    const item = this.ApplyOnGiveProduct(offer);
+    this.items.unshift(item);
+    if (item) {
+      offer.give_item_row_id = item.posa_row_id;
+    }
+  }
+},
 
     applyNewOffer(offer) {
       if (offer.apply_on === "Buy Get Free") {
@@ -3876,10 +3801,6 @@ export default {
       this.addOfferToItems(newOffer);
     },
 
-
-
-
-    // 3. ADD THIS NEW METHOD FOR OPTIMAL ALLOCATION
     calculateOptimalOfferAllocation(offer, eligibleItems, buyQty, getQty) {
       console.log('🔄 Calculating optimal allocation...');
 
@@ -4315,20 +4236,6 @@ export default {
       console.log(`✅ Removed offer from ${itemsAffected} items`);
     },
 
-
-    removeExistingOfferApplication(offer) {
-      const existingOffer = this.posa_offers.find(o =>
-        o.offer_name === offer.name || o.row_id === offer.row_id
-      );
-
-      if (existingOffer) {
-        this.RemoveBuyGetFreeOffer(existingOffer);
-      }
-    },
-
-
-
-    // 18. ADD CHANGE DETECTION HELPER
     hasSignificantItemChanges(newItems, oldItems) {
       if (!oldItems || newItems.length !== oldItems.length) {
         return true;
@@ -5398,18 +5305,22 @@ export default {
     },
     // Watch for items array changes (deep) and re-handle offers
     items: {
-      deep: true,
-      handler(newItems, oldItems) {
-        if (this.hasSignificantItemChanges(newItems, oldItems)) {
-          this.reEvaluateActiveOffers();
-        }
+    deep: true,
+    handler(newItems, oldItems) {
+      // Only do a simple force update here
+      this.$forceUpdate();
+      
+      // Only re-evaluate if there are significant changes
+      if (this.hasSignificantItemChanges(newItems, oldItems)) {
+        this.reEvaluateActiveOffers(); // This now handles everything
       }
-    },
+    }
+  },
     // Watch for invoice type change and emit
     invoiceType() {
       this.eventBus.emit("update_invoice_type", this.invoiceType);
     },
-    // Watch for additional discount and update percentage accordingly
+    
     additional_discount() {
       if (!this.additional_discount || this.additional_discount == 0) {
         this.additional_discount_percentage = 0;
