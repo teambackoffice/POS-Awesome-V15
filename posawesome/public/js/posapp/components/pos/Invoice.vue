@@ -1316,6 +1316,7 @@ export default {
       doc.set_posting_time = 1;
       doc.posting_date = this.posting_date;
       if (this.pos_profile.custom_discount_account) {
+        doc.is_cash_or_non_trade_discount = 1;
         doc.additional_discount_account = this.pos_profile.custom_discount_account;
       }
 
@@ -4836,10 +4837,6 @@ applyNewStandardOffer(offer) {
       }
 
       try {
-        console.log('Updating currency exchange rate...');
-        console.log('Selected:', currency, 'Base:', this.pos_profile.currency, 'Date:', this.posting_date);
-
-        // Get rate from selected to base currency
         const response = await frappe.call({
           method: "erpnext.setup.utils.get_exchange_rate",
           args: {
