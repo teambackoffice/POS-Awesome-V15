@@ -2697,31 +2697,68 @@ cancel_reference_dialog() {
       this.$forceUpdate();
     },
 
-    // Update UOM (unit of measure) for an item and recalculate prices
-    calc_uom(item, value) {
-      const new_uom = item.item_uoms.find((element) => element.uom == value);
-      if (!new_uom) {
-        this.eventBus.emit("show_message", {
-          title: __("UOM not found"),
-          color: "error",
-        });
-        return;
-      }
+    // Update UOM (unit of measure) for an item and fetch rate from Item Price
+async calc_uom(item, value) {
+  const new_uom = item.item_uoms.find((element) => element.uom == value);
+  if (!new_uom) {
+    this.eventBus.emit("show_message", {
+      title: __("UOM not found"),
+      color: "error",
+    });
+    return;
+  }
 
-      // Store old conversion factor for ratio calculation
-      const old_conversion_factor = item.conversion_factor || 1;
+  // Store old conversion factor for ratio calculation
+  const old_conversion_factor = item.conversion_factor || 1;
+  
+  // Update conversion factor
+  item.conversion_factor = new_uom.conversion_factor;
+
+  // Reset discount if not offer
+  if (!item.posa_offer_applied) {
+    item.discount_amount = 0;
+    item.discount_percentage = 0;
+  }
+
+  try {
+    // Fetch item price for the specific UOM
+    const response = await frappe.call({
+      method: "posawesome.posawesome.api.invoice.get_item_price_for_uom",
+      args: {
+        item_code: item.item_code,
+        price_list: this.get_price_list(),
+        uom: value,
+        customer: this.customer,
+        company: this.pos_profile.company,
+        currency: this.pos_profile.currency,
+        conversion_factor: item.conversion_factor
+      }
+    });
+
+    if (response && response.message && response.message.price_list_rate) {
+      // Use the fetched price from Item Price
+      const fetched_rate = response.message.price_list_rate;
       
-      // Update conversion factor
-      item.conversion_factor = new_uom.conversion_factor;
-
-      // Calculate the ratio of new to old conversion factor
-      const conversion_ratio = item.conversion_factor / old_conversion_factor;
-
-      // Reset discount if not offer
-      if (!item.posa_offer_applied) {
-        item.discount_amount = 0;
-        item.discount_percentage = 0;
+      // Set base rates (always in base currency)
+      item.base_rate = fetched_rate;
+      item.base_price_list_rate = fetched_rate;
+      
+      // Convert to selected currency if needed
+      if (this.selected_currency !== this.pos_profile.currency) {
+        // If exchange rate is 300 PKR = 1 USD
+        // To convert PKR to USD: divide by exchange rate
+        item.rate = this.flt(fetched_rate / this.exchange_rate, this.currency_precision);
+        item.price_list_rate = item.rate;
+      } else {
+        item.rate = fetched_rate;
+        item.price_list_rate = fetched_rate;
       }
+
+      console.log(`Found Item Price for ${item.item_code} with UOM ${value}: ${fetched_rate}`);
+      
+    } else {
+      // Fallback to conversion factor calculation if no Item Price found
+      console.log(`No Item Price found for ${item.item_code} with UOM ${value}, using conversion factor`);
       
       // Store original base rates if not already stored
       if (!item.original_base_rate && !item.posa_offer_applied) {
@@ -2747,9 +2784,6 @@ cancel_reference_dialog() {
           
           // Convert to selected currency
           if (this.selected_currency !== this.pos_profile.currency) {
-            // If exchange rate is 300 PKR = 1 USD
-            // To convert PKR to USD: divide by exchange rate
-            // Example: 3000 PKR / 300 = 10 USD
             item.rate = this.flt(converted_rate / this.exchange_rate, this.currency_precision);
             item.price_list_rate = item.rate;
           } else {
@@ -2769,9 +2803,6 @@ cancel_reference_dialog() {
         
         // Convert to selected currency
         if (this.selected_currency !== this.pos_profile.currency) {
-          // If exchange rate is 300 PKR = 1 USD
-          // To convert PKR to USD: divide by exchange rate
-          // Example: 3000 PKR / 300 = 10 USD
           item.rate = this.flt(item.base_rate / this.exchange_rate, this.currency_precision);
           item.price_list_rate = this.flt(item.base_price_list_rate / this.exchange_rate, this.currency_precision);
         } else {
@@ -2779,11 +2810,44 @@ cancel_reference_dialog() {
           item.price_list_rate = item.base_price_list_rate;
         }
       }
+    }
 
-      // Update item details
-      this.calc_stock_qty(item, item.qty);
-      this.$forceUpdate();
-    },
+  } catch (error) {
+    console.error("Error fetching item price for UOM:", error);
+    
+    // Fallback to conversion factor calculation on error
+    if (!item.original_base_rate && !item.posa_offer_applied) {
+      item.original_base_rate = item.base_rate / old_conversion_factor;
+      item.original_base_price_list_rate = item.base_price_list_rate / old_conversion_factor;
+    }
+
+    if (item.batch_price) {
+      item.base_rate = item.batch_price * item.conversion_factor;
+      item.base_price_list_rate = item.base_rate;
+    } else if (item.original_base_rate) {
+      item.base_rate = item.original_base_rate * item.conversion_factor;
+      item.base_price_list_rate = item.original_base_price_list_rate * item.conversion_factor;
+    }
+    
+    // Convert to selected currency
+    if (this.selected_currency !== this.pos_profile.currency) {
+      item.rate = this.flt(item.base_rate / this.exchange_rate, this.currency_precision);
+      item.price_list_rate = this.flt(item.base_price_list_rate / this.exchange_rate, this.currency_precision);
+    } else {
+      item.rate = item.base_rate;
+      item.price_list_rate = item.base_price_list_rate;
+    }
+
+    this.eventBus.emit("show_message", {
+      title: __("Could not fetch item price for UOM, using conversion factor"),
+      color: "warning",
+    });
+  }
+
+  // Update item details and force UI update
+  this.calc_stock_qty(item, item.qty);
+  this.$forceUpdate();
+},
 
     // Calculate stock quantity for an item
     calc_stock_qty(item, value) {

@@ -628,7 +628,6 @@ export default {
       phone_dialog: false, // Show phone payment dialog
       order_delivery_date: false, // Delivery date menu state
       new_delivery_date: new Date(), // Set today's date as default
-      new_delivery_date: null, // New delivery date value
       po_date_menu: false, // PO date menu state
       new_po_date: null, // New PO date value
       date_menu: false, // Due date menu state
