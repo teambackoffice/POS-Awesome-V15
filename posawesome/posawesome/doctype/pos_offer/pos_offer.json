@@ -120,6 +120,7 @@
    "fieldname": "item",
    "fieldtype": "Table",
    "label": "Apply Rule On Item Code",
+   "no_copy": 1,
    "options": "Pricing Rule Item Code"
   },
   {
@@ -138,13 +139,15 @@
    "default": "0",
    "fieldname": "min_qty",
    "fieldtype": "Float",
-   "label": "Min Quantity"
+   "label": "Min Quantity",
+   "no_copy": 1
   },
   {
    "default": "0",
    "fieldname": "max_qty",
    "fieldtype": "Float",
-   "label": "Max Quantity"
+   "label": "Max Quantity",
+   "no_copy": 1
   },
   {
    "fieldname": "column_break_16",
@@ -153,12 +156,14 @@
   {
    "fieldname": "min_amt",
    "fieldtype": "Float",
-   "label": "Min Amount"
+   "label": "Min Amount",
+   "no_copy": 1
   },
   {
    "fieldname": "max_amt",
    "fieldtype": "Float",
-   "label": "Max Amount"
+   "label": "Max Amount",
+   "no_copy": 1
   },
   {
    "default": "Today",
@@ -210,6 +215,7 @@
    "fieldtype": "Select",
    "label": "Discount Type",
    "mandatory_depends_on": "eval:doc.apply_on !=\"Buy Get Free\"",
+   "no_copy": 1,
    "options": "\nRate\nDiscount Percentage\nDiscount Amount"
   },
   {
@@ -219,17 +225,20 @@
   {
    "fieldname": "rate",
    "fieldtype": "Float",
-   "label": "Rate"
+   "label": "Rate",
+   "no_copy": 1
   },
   {
    "fieldname": "discount_amount",
    "fieldtype": "Float",
-   "label": "Discount Amount"
+   "label": "Discount Amount",
+   "no_copy": 1
   },
   {
    "fieldname": "discount_percentage",
    "fieldtype": "Float",
-   "label": "Discount Percentage"
+   "label": "Discount Percentage",
+   "no_copy": 1
   },
   {
    "fieldname": "product_discount_scheme_section",
@@ -271,6 +280,7 @@
    "in_standard_filter": 1,
    "label": "Promo Type",
    "mandatory_depends_on": "eval:doc.apply_on != \"Buy Get Free\"",
+   "no_copy": 1,
    "options": "Item Price\nGive Product\nGrand Total\nLoyalty Point"
   },
   {
@@ -326,7 +336,8 @@
    "fieldname": "min_buy_quantity",
    "fieldtype": "Float",
    "label": "Buy Quantity ",
-   "mandatory_depends_on": "eval:doc.apply_on ==\"Buy Get Free\""
+   "mandatory_depends_on": "eval:doc.apply_on ==\"Buy Get Free\"",
+   "no_copy": 1
   },
   {
    "fieldname": "column_break_bnnn",
@@ -336,7 +347,8 @@
    "fieldname": "max_get_quantity",
    "fieldtype": "Float",
    "label": "Get Quantity",
-   "mandatory_depends_on": "eval:doc.apply_on ==\"Buy Get Free\""
+   "mandatory_depends_on": "eval:doc.apply_on ==\"Buy Get Free\"",
+   "no_copy": 1
   },
   {
    "allow_bulk_edit": 1,
@@ -345,12 +357,13 @@
    "fieldtype": "Table",
    "label": "Rule Item Code",
    "mandatory_depends_on": "eval:doc.apply_on ==\"Buy Get Free\"",
+   "no_copy": 1,
    "options": "Pos offer Item"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-05-23 15:28:20.323108",
+ "modified": "2025-06-05 17:02:14.002472",
  "modified_by": "Administrator",
  "module": "POSAwesome",
  "name": "POS Offer",
