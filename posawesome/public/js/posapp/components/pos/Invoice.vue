@@ -1117,6 +1117,12 @@ add_free_item(item) {
       new_item.posa_delivery_date = "";
       new_item.posa_row_id = this.makeid(20);
       // Expand row if batch/serial required
+
+      if (item.is_bundle_item) {
+    new_item.is_bundle_item = item.is_bundle_item;
+    new_item.parent_bundle = item.parent_bundle;
+    new_item.custom_bundle_id = item.custom_bundle_id;
+  }
       if (
         (!this.pos_profile.posa_auto_set_batch && new_item.has_batch_no) ||
         new_item.has_serial_no
@@ -1621,6 +1627,9 @@ add_free_item(item) {
           batch_no: item.batch_no,
           posa_notes: item.posa_notes,
           posa_delivery_date: item.posa_delivery_date,
+          is_bundle_item: item.is_bundle_item || 0,
+          parent_bundle: item.parent_bundle || "",
+          custom_bundle_id: item.custom_bundle_id || ""
         };
 
         // Handle currency conversion for rates and amounts
