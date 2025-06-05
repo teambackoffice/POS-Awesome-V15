@@ -1687,7 +1687,7 @@ def get_offers(profile):
         values=values,
         as_dict=1,
     )
-    
+    # ===========================================================
     for offer in offers:
         if offer.get("apply_on") == "Item Code":
             offer_items = frappe.db.sql(
@@ -1700,7 +1700,7 @@ def get_offers(profile):
                 as_dict=1
             )
             offer["item"] = offer_items
-        
+        # ===========================================================
         elif offer.get("apply_on") == "Buy Get Free":
             rule_items = frappe.db.sql(
                 """
