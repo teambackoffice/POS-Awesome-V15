@@ -9,15 +9,12 @@
           v-model:expanded="expanded" show-expand item-key="row_id" class="elevation-1" :items-per-page="itemsPerPage"
           hide-default-footer>
           <template v-slot:item.offer_applied="{ item }">
-            <v-checkbox-btn
-              :model-value="item.offer_applied"
-              @click.stop="toggleOfferApplied(item)"
-              :disabled="(item.offer == 'Give Product' &&
-                          !item.give_item &&
-                          (!item.replace_cheapest_item || !item.replace_item)) ||
-                        (item.offer == 'Grand Total' &&
-                          discount_percentage_offer_name &&
-                          discount_percentage_offer_name != item.name)">
+            <v-checkbox-btn :model-value="item.offer_applied" @click.stop="toggleOfferApplied(item)" :disabled="(item.offer == 'Give Product' &&
+              !item.give_item &&
+              (!item.replace_cheapest_item || !item.replace_item)) ||
+              (item.offer == 'Grand Total' &&
+                discount_percentage_offer_name &&
+                discount_percentage_offer_name != item.name)">
             </v-checkbox-btn>
           </template>
           <template v-slot:expanded-item="{ headers, item }">
@@ -44,7 +41,7 @@
       <v-row align="start" no-gutters>
         <v-col cols="12">
           <v-btn block class="pa-1" size="large" color="warning" theme="dark" @click="back_to_invoice">{{ __('Back')
-            }}</v-btn>
+          }}</v-btn>
         </v-col>
       </v-row>
     </v-card>
@@ -92,14 +89,43 @@ export default {
       this.pos_offers = list_offers;
     },
     toggleOfferApplied(item) {
-    // Toggle the current state (check/uncheck)
-    item.offer_applied = !item.offer_applied;
+      console.log('🔄 Toggling offer in offers component:', item.name, 'Current state:', item.offer_applied);
 
-    // Emit updated list of applied offers
-    this.handelOffers();
-    this.updateCounters();
-    this.updatePosCoupuns();
+      // Toggle the current state (check/uncheck)
+      item.offer_applied = !item.offer_applied;
+
+      console.log('📡 Emitting offer toggle to invoice:', item.name, 'New state:', item.offer_applied);
+
+      // Emit to invoice component with the new state
+      this.eventBus.emit('toggle_offer_applied', {
+        row_id: item.row_id,
+        name: item.name,
+        offer_applied: item.offer_applied,
+        apply_on: item.apply_on,
+        offer: item.offer
+      });
+
+      // Update counters
+      this.updateCounters();
+      this.updatePosCoupuns();
     },
+    getCurrentOfferStates() {
+      return this.pos_offers.map(offer => ({
+        row_id: offer.row_id,
+        name: offer.name,
+        offer_applied: offer.offer_applied,
+        apply_on: offer.apply_on,
+        offer: offer.offer
+      }));
+    },
+    handleOfferStateRequest() {
+      console.log('📡 Received request for offer states, sending response...');
+      const currentStates = this.getCurrentOfferStates();
+      console.log('📊 Sending offer states:', currentStates);
+      this.eventBus.emit('offer_states_response', currentStates);
+    },
+
+
 
     makeid(length) {
       let result = '';
@@ -113,26 +139,50 @@ export default {
       return result;
     },
     updatePosOffers(offers) {
+      console.log('📊 Updating POS offers in offers component:', offers.length);
+
       const toRemove = [];
+
+      // Check for offers to remove
       this.pos_offers.forEach((pos_offer) => {
         const offer = offers.find((offer) => offer.name === pos_offer.name);
         if (!offer) {
           toRemove.push(pos_offer.row_id);
         }
       });
-      // this.removeOffers(toRemove);
+
+      // Remove invalid offers
+      toRemove.forEach(row_id => {
+        const index = this.pos_offers.findIndex(o => o.row_id === row_id);
+        if (index !== -1) {
+          console.log('🗑️ Removing invalid offer from display');
+          this.pos_offers.splice(index, 1);
+        }
+      });
+
+      // Add or update offers
       offers.forEach((offer) => {
         const pos_offer = this.pos_offers.find(
           (pos_offer) => offer.name === pos_offer.name
         );
+
         if (pos_offer) {
+          // Update existing offer
           pos_offer.items = offer.items;
+
+          // Preserve manual toggle state unless it's auto-applied
+          if (offer.auto && pos_offer.offer_applied === undefined) {
+            pos_offer.offer_applied = !!offer.auto;
+          }
+
+          // Handle special cases
           if (
             pos_offer.offer === 'Grand Total' &&
             !this.discount_percentage_offer_name
           ) {
             pos_offer.offer_applied = !!pos_offer.auto;
           }
+
           if (
             offer.apply_on == 'Item Group' &&
             offer.apply_type == 'Item Group' &&
@@ -142,15 +192,19 @@ export default {
             pos_offer.apply_item_code = offer.apply_item_code;
           }
         } else {
+          // Add new offer
           const newOffer = { ...offer };
           if (!offer.row_id) {
             newOffer.row_id = this.makeid(20);
           }
+
           if (offer.apply_type == 'Item Code') {
             newOffer.give_item = offer.apply_item_code || 'Nothing';
           }
-          if (offer.offer_applied) {
-            newOffer.offer_applied == !!offer.offer_applied;
+
+          // Set initial state based on offer conditions
+          if (offer.offer_applied !== undefined) {
+            newOffer.offer_applied = !!offer.offer_applied;
           } else {
             if (
               offer.apply_type == 'Item Group' &&
@@ -168,16 +222,24 @@ export default {
               newOffer.offer_applied = !!offer.auto;
             }
           }
+
           if (newOffer.offer == 'Give Product' && !newOffer.give_item) {
-            newOffer.give_item = this.get_give_items(newOffer)[0].item_code;
+            const giveItems = this.get_give_items(newOffer);
+            newOffer.give_item = giveItems.length > 0 ? giveItems[0].item_code : null;
           }
+
           this.pos_offers.push(newOffer);
+
           this.eventBus.emit('show_message', {
             title: __('New Offer Available'),
             color: 'warning',
           });
         }
       });
+
+      // Update counters after all changes
+      this.updateCounters();
+      this.updatePosCoupuns();
     },
     removeOffers(offers_id_list) {
       this.pos_offers = this.pos_offers.filter(
@@ -244,27 +306,175 @@ export default {
   },
 
 
+  toggleOfferApplied(item) {
+    console.log('🔄 Toggling offer in offers component:', item.name, 'Current state:', item.offer_applied);
+
+    // Toggle the current state (check/uncheck)
+    item.offer_applied = !item.offer_applied;
+
+    console.log('📡 Emitting offer toggle to invoice:', item.name, 'New state:', item.offer_applied);
+
+    // Emit to invoice component with the new state
+    this.eventBus.emit('toggle_offer_applied', {
+      row_id: item.row_id,
+      name: item.name,
+      offer_applied: item.offer_applied,
+      apply_on: item.apply_on,
+      offer: item.offer
+    });
+
+    // Update counters
+    this.updateCounters();
+    this.updatePosCoupuns();
+  },
+
+  // New method to provide current offer states
+  getCurrentOfferStates() {
+    return this.pos_offers.map(offer => ({
+      row_id: offer.row_id,
+      name: offer.name,
+      offer_applied: offer.offer_applied,
+      apply_on: offer.apply_on,
+      offer: offer.offer
+    }));
+  },
+
+  // Enhanced updatePosOffers method
+  updatePosOffers(offers) {
+    console.log('📊 Updating POS offers in offers component:', offers.length);
+
+    const toRemove = [];
+
+    // Check for offers to remove
+    this.pos_offers.forEach((pos_offer) => {
+      const offer = offers.find((offer) => offer.name === pos_offer.name);
+      if (!offer) {
+        toRemove.push(pos_offer.row_id);
+      }
+    });
+
+    // Remove invalid offers
+    toRemove.forEach(row_id => {
+      const index = this.pos_offers.findIndex(o => o.row_id === row_id);
+      if (index !== -1) {
+        console.log('🗑️ Removing invalid offer from display');
+        this.pos_offers.splice(index, 1);
+      }
+    });
+
+    // Add or update offers
+    offers.forEach((offer) => {
+      const pos_offer = this.pos_offers.find(
+        (pos_offer) => offer.name === pos_offer.name
+      );
+
+      if (pos_offer) {
+        // Update existing offer
+        pos_offer.items = offer.items;
+
+        // Preserve manual toggle state unless it's auto-applied
+        if (offer.auto && pos_offer.offer_applied === undefined) {
+          pos_offer.offer_applied = !!offer.auto;
+        }
+
+        // Handle special cases
+        if (
+          pos_offer.offer === 'Grand Total' &&
+          !this.discount_percentage_offer_name
+        ) {
+          pos_offer.offer_applied = !!pos_offer.auto;
+        }
+
+        if (
+          offer.apply_on == 'Item Group' &&
+          offer.apply_type == 'Item Group' &&
+          offer.replace_cheapest_item
+        ) {
+          pos_offer.give_item = offer.give_item;
+          pos_offer.apply_item_code = offer.apply_item_code;
+        }
+      } else {
+        // Add new offer
+        const newOffer = { ...offer };
+        if (!offer.row_id) {
+          newOffer.row_id = this.makeid(20);
+        }
+
+        if (offer.apply_type == 'Item Code') {
+          newOffer.give_item = offer.apply_item_code || 'Nothing';
+        }
+
+        // Set initial state based on offer conditions
+        if (offer.offer_applied !== undefined) {
+          newOffer.offer_applied = !!offer.offer_applied;
+        } else {
+          if (
+            offer.apply_type == 'Item Group' &&
+            offer.offer == 'Give Product' &&
+            !offer.replace_cheapest_item &&
+            !offer.replace_item
+          ) {
+            newOffer.offer_applied = false;
+          } else if (
+            offer.offer === 'Grand Total' &&
+            this.discount_percentage_offer_name
+          ) {
+            newOffer.offer_applied = false;
+          } else {
+            newOffer.offer_applied = !!offer.auto;
+          }
+        }
+
+        if (newOffer.offer == 'Give Product' && !newOffer.give_item) {
+          newOffer.give_item = this.get_give_items(newOffer)[0]?.item_code;
+        }
+
+        this.pos_offers.push(newOffer);
+
+        this.eventBus.emit('show_message', {
+          title: __('New Offer Available'),
+          color: 'warning',
+        });
+      }
+    });
+
+    // Update counters after all changes
+    this.updateCounters();
+    this.updatePosCoupuns();
+  },
+
+
+  // Enhanced created lifecycle
   created: function () {
     this.$nextTick(function () {
       this.eventBus.on('register_pos_profile', (data) => {
         this.pos_profile = data.pos_profile;
       });
     });
+
     this.eventBus.on('update_customer', (customer) => {
       if (this.customer != customer) {
-        this.offers = [];
+        this.pos_offers = [];
       }
     });
+
     this.eventBus.on('update_pos_offers', (data) => {
       this.updatePosOffers(data);
     });
+
     this.eventBus.on('update_discount_percentage_offer_name', (data) => {
       this.discount_percentage_offer_name = data.value;
     });
+
     this.eventBus.on('set_all_items', (data) => {
       this.allItems = data;
     });
-  },
+
+    // FIXED: Handle offer state requests from invoice component
+    this.eventBus.on('request_offer_states', () => {
+      this.handleOfferStateRequest();
+    });
+  }
 };
 
 

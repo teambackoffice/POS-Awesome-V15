@@ -696,14 +696,25 @@ export default {
 
         // Check if cart is now empty
         if (this.items.length === 0) {
-          console.log('Cart is empty after removal');
+          console.log('🛒 Cart is empty after removal');
           this.clearAllOffersWhenCartEmpty();
         } else {
-          // Re-evaluate remaining offers after a short delay
-          this.$nextTick(() => {
-            setTimeout(() => {
-              console.log('Re-evaluating offers after item removal');
-              this.reEvaluateActiveOffers();
+          // FIXED: Use promise-based sync instead of .once()
+          this.$nextTick(async () => {
+            setTimeout(async () => {
+              console.log('📊 Re-evaluating offers after item removal with sync');
+
+              try {
+                await this.syncOfferStatesWithOffersComponent();
+                // Then re-evaluate offers
+                setTimeout(() => {
+                  this.reEvaluateActiveOffers();
+                }, 100);
+              } catch (error) {
+                console.error('❌ Error syncing offer states:', error);
+                // Fallback: just re-evaluate without sync
+                this.reEvaluateActiveOffers();
+              }
             }, 100);
           });
         }
@@ -3510,14 +3521,13 @@ export default {
     },
 
 
-
     reEvaluateActiveOffers() {
       // Clear any existing timeout
       if (this.offerEvaluationTimeout) {
         clearTimeout(this.offerEvaluationTimeout);
       }
 
-      this.offerEvaluationTimeout = setTimeout(() => {
+      this.offerEvaluationTimeout = setTimeout(async () => {
         console.log('\n🔄 === COMPREHENSIVE OFFER RE-EVALUATION ===');
 
         // Check if cart is empty
@@ -3527,45 +3537,253 @@ export default {
           return;
         }
 
-        // Get ALL types of offers that need re-evaluation
-        const allApplicableOffers = this.posOffers.filter(offer =>
-          this.checkOfferCoupon(offer)
-        );
+        try {
+          // FIXED: Use promise-based sync instead of .once()
+          const offerStates = await this.syncOfferStatesWithOffersComponent();
+          console.log('📊 Got offer states before re-evaluation:', offerStates);
 
-        if (allApplicableOffers.length === 0) {
-          console.log('ℹ️ No offers to evaluate');
-          this.eventBus.emit("update_pos_offers", []);
-          // Sync with offers component
-          this.syncOfferStatesWithOffersComponent();
-          return;
-        }
+          // Get ALL types of offers that need re-evaluation
+          const allApplicableOffers = this.posOffers.filter(offer => {
+            if (!this.checkOfferCoupon(offer)) return false;
 
-        // Group offers by type for proper processing order
-        const offersByType = {
-          'Buy Get Free': [],
-          'Item Code': [],
-          'Item Group': [],
-          'Brand': [],
-          'Transaction': []
-        };
+            // FIXED: Check if offer is manually unchecked
+            const offerState = offerStates.find(state => state.row_id === offer.row_id);
+            if (offerState && offerState.offer_applied === false) {
+              console.log(`⏭️ Skipping manually unchecked offer: ${offer.name}`);
+              return false;
+            }
 
-        allApplicableOffers.forEach(offer => {
-          if (offersByType[offer.apply_on]) {
-            offersByType[offer.apply_on].push(offer);
+            return true;
+          });
+
+          if (allApplicableOffers.length === 0) {
+            console.log('ℹ️ No offers to evaluate (all unchecked or invalid)');
+            this.eventBus.emit("update_pos_offers", []);
+            return;
           }
-        });
 
-        // Process offers in order
-        this.processOffersByType(offersByType);
+          // Group offers by type for proper processing order
+          const offersByType = {
+            'Buy Get Free': [],
+            'Item Code': [],
+            'Item Group': [],
+            'Brand': [],
+            'Transaction': []
+          };
 
-        // Sync with offers component after processing
-        this.$nextTick(() => {
-          this.syncOfferStatesWithOffersComponent();
-        });
+          allApplicableOffers.forEach(offer => {
+            if (offersByType[offer.apply_on]) {
+              offersByType[offer.apply_on].push(offer);
+            }
+          });
+
+          // Process offers in order with state awareness
+          this.processOffersByTypeWithStates(offersByType, offerStates);
+        } catch (error) {
+          console.error('❌ Error in offer re-evaluation:', error);
+          // Fallback: process without state sync
+          this.processStandardOfferEvaluation();
+        }
 
         console.log('✅ === COMPREHENSIVE RE-EVALUATION COMPLETED ===\n');
       }, 50);
     },
+    processStandardOfferEvaluation() {
+      console.log('🔄 Processing standard offer evaluation (fallback)');
+
+      // Get ALL types of offers that need re-evaluation
+      const allApplicableOffers = this.posOffers.filter(offer =>
+        this.checkOfferCoupon(offer)
+      );
+
+      if (allApplicableOffers.length === 0) {
+        console.log('ℹ️ No offers to evaluate');
+        this.eventBus.emit("update_pos_offers", []);
+        return;
+      }
+
+      // Group offers by type for proper processing order
+      const offersByType = {
+        'Buy Get Free': [],
+        'Item Code': [],
+        'Item Group': [],
+        'Brand': [],
+        'Transaction': []
+      };
+
+      allApplicableOffers.forEach(offer => {
+        if (offersByType[offer.apply_on]) {
+          offersByType[offer.apply_on].push(offer);
+        }
+      });
+
+      // Process offers without state awareness
+      this.processOffersByType(offersByType);
+    },
+
+    processOffersByTypeWithStates(offersByType, offerStates) {
+      // Step 1: Clean offer traces for unchecked offers only
+      this.cleanUncheckedOfferTraces(offerStates);
+
+      // Step 2: Process each offer type in sequence
+      setTimeout(() => {
+        // Process Buy Get Free offers first
+        offersByType['Buy Get Free'].forEach(offer => {
+          try {
+            const offerState = offerStates.find(state => state.row_id === offer.row_id);
+            if (!offerState || offerState.offer_applied !== false) {
+              console.log(`🎯 Processing Buy-Get offer: ${offer.name}`);
+              const updatedOffer = this.getItemBuyGetFree(offer);
+              if (updatedOffer) {
+                this.ApplyBuyGetFreeOffer(updatedOffer);
+              }
+            }
+          } catch (error) {
+            console.error(`❌ Error processing Buy-Get offer ${offer.name}:`, error);
+          }
+        });
+
+        // Process other offer types
+        const otherOfferTypes = ['Item Code', 'Item Group', 'Brand', 'Transaction'];
+        otherOfferTypes.forEach(offerType => {
+          offersByType[offerType].forEach(offer => {
+            try {
+              const offerState = offerStates.find(state => state.row_id === offer.row_id);
+              if (!offerState || offerState.offer_applied !== false) {
+                console.log(`🎯 Processing ${offerType} offer: ${offer.name}`);
+                let applicableOffer = null;
+
+                switch (offerType) {
+                  case 'Item Code':
+                    applicableOffer = this.getItemOffer(offer);
+                    break;
+                  case 'Item Group':
+                    applicableOffer = this.getGroupOffer(offer);
+                    break;
+                  case 'Brand':
+                    applicableOffer = this.getBrandOffer(offer);
+                    break;
+                  case 'Transaction':
+                    applicableOffer = this.getTransactionOffer(offer);
+                    break;
+                }
+
+                if (applicableOffer) {
+                  this.applyStandardOffer(applicableOffer);
+                }
+              }
+            } catch (error) {
+              console.error(`❌ Error processing ${offerType} offer ${offer.name}:`, error);
+            }
+          });
+        });
+
+        // Final step: Update offer list and UI
+        this.updateOfferDisplayListWithStates(offerStates);
+      }, 100);
+    },
+
+    updateOfferDisplayListWithStates(offerStates = []) {
+      const applicableOffers = [];
+
+      // Re-evaluate all offers to build the display list
+      this.posOffers.forEach((offer) => {
+        if (!this.checkOfferCoupon(offer)) return;
+
+        // Check if offer is manually unchecked
+        const offerState = offerStates.find(state => state.row_id === offer.row_id);
+        const isManuallyUnchecked = offerState && offerState.offer_applied === false;
+
+        let applicableOffer = null;
+
+        switch (offer.apply_on) {
+          case "Item Code":
+            applicableOffer = this.getItemOffer(offer);
+            break;
+          case "Buy Get Free":
+            applicableOffer = this.getItemBuyGetFree(offer);
+            break;
+          case "Item Group":
+            applicableOffer = this.getGroupOffer(offer);
+            break;
+          case "Brand":
+            applicableOffer = this.getBrandOffer(offer);
+            break;
+          case "Transaction":
+            applicableOffer = this.getTransactionOffer(offer);
+            break;
+        }
+
+        if (applicableOffer) {
+          // Set the correct offer_applied state
+          applicableOffer.offer_applied = !isManuallyUnchecked;
+          applicableOffers.push(applicableOffer);
+        }
+      });
+
+      // Process any additional offer logic
+      this.setItemGiveOffer(applicableOffers);
+
+      // Update the POS offer display
+      this.updatePosOffers(applicableOffers);
+
+      console.log(`📊 Found ${applicableOffers.length} applicable offers with states`);
+    },
+
+
+    cleanUncheckedOfferTraces(offerStates) {
+      console.log('🧹 Cleaning unchecked offer traces...');
+
+      // Only clean offers that are explicitly unchecked
+      offerStates.forEach(offerState => {
+        if (offerState.offer_applied === false) {
+          const appliedOffer = this.posa_offers.find(o => o.row_id === offerState.row_id);
+          if (appliedOffer) {
+            console.log(`🗑️ Removing unchecked offer: ${appliedOffer.offer_name}`);
+            this.removeApplyOffer(appliedOffer);
+          }
+        }
+      });
+
+      console.log('✅ Unchecked offer traces cleaned');
+    },
+
+    syncOfferStatesWithOffersComponent() {
+      console.log('🔄 Syncing offer states with offers component...');
+
+      // Create a promise-based approach instead of using .once()
+      return new Promise((resolve) => {
+        // Set up one-time listener manually
+        const handleOfferStatesResponse = (offerStates) => {
+          console.log('📊 Received offer states from offers component:', offerStates);
+
+          // Remove the listener after receiving response
+          this.eventBus.off('offer_states_response', handleOfferStatesResponse);
+
+          // Update our applied offers based on the component state
+          this.posa_offers = this.posa_offers.filter(appliedOffer => {
+            const offerState = offerStates.find(state => state.row_id === appliedOffer.row_id);
+
+            if (offerState && !offerState.offer_applied) {
+              console.log(`❌ Removing unapplied offer: ${appliedOffer.offer_name}`);
+              this.removeApplyOffer(appliedOffer);
+              return false;
+            }
+
+            return true;
+          });
+
+          resolve(offerStates);
+        };
+
+        // Listen for the response
+        this.eventBus.on('offer_states_response', handleOfferStatesResponse);
+
+        // Request the states
+        this.eventBus.emit('request_offer_states');
+      });
+    },
+
 
     processOffersByType(offersByType) {
       // Step 1: Clean ALL offer traces first
@@ -5212,6 +5430,54 @@ export default {
 
       this.update_item_rates();
     },
+    applyOfferFromToggle(offer) {
+      console.log('✅ Applying offer from toggle:', offer.name);
+
+      // Find the full offer details
+      const fullOffer = this.posOffers.find(o => o.row_id === offer.row_id);
+      if (!fullOffer) {
+        console.error('Full offer not found:', offer.name);
+        return;
+      }
+
+      // Apply based on offer type
+      if (fullOffer.apply_on === "Buy Get Free") {
+        const updatedOffer = this.getItemBuyGetFree(fullOffer);
+        if (updatedOffer) {
+          this.ApplyBuyGetFreeOffer(updatedOffer);
+        }
+      } else {
+        let applicableOffer = null;
+
+        switch (fullOffer.apply_on) {
+          case "Item Code":
+            applicableOffer = this.getItemOffer(fullOffer);
+            break;
+          case "Item Group":
+            applicableOffer = this.getGroupOffer(fullOffer);
+            break;
+          case "Brand":
+            applicableOffer = this.getBrandOffer(fullOffer);
+            break;
+          case "Transaction":
+            applicableOffer = this.getTransactionOffer(fullOffer);
+            break;
+        }
+
+        if (applicableOffer) {
+          this.applyStandardOffer(applicableOffer);
+        }
+      }
+    },
+    removeOfferFromToggle(offer) {
+      console.log('❌ Removing offer from toggle:', offer.name);
+
+      // Find and remove the applied offer
+      const appliedOffer = this.posa_offers.find(o => o.row_id === offer.row_id);
+      if (appliedOffer) {
+        this.removeApplyOffer(appliedOffer);
+      }
+    },
 
     update_item_rates() {
       console.log('Updating item rates with exchange rate:', this.exchange_rate);
@@ -5426,7 +5692,7 @@ export default {
       this.customer = data.pos_profile.customer;
       this.pos_opening_shift = data.pos_opening_shift;
       this.stock_settings = data.stock_settings;
-      // Increase precision for better handling of small amounts
+
       this.invoiceType = this.pos_profile.posa_default_sales_order
         ? "Order"
         : "Invoice";
@@ -5437,10 +5703,6 @@ export default {
 
       frappe.db.get_single_value("System Settings", "currency_precision").then((val) => {
         this.currency_precision = parseInt(val || 2);
-      });
-      this.eventBus.on("toggle_offer_applied", (offer) => {
-        console.log('📡 Received offer toggle from offers component:', offer.name);
-        this.toggleOfferApplied(offer);
       });
 
       // Add this block to handle currency initialization
@@ -5458,60 +5720,73 @@ export default {
         });
       }
     });
+
+    // FIXED: Add event listeners for offer state synchronization
+    this.eventBus.on("toggle_offer_applied", (offer) => {
+      console.log('📡 Received offer toggle from offers component:', offer.name);
+      this.toggleOfferApplied(offer);
+    });
+
     this.eventBus.on("add_item", (item) => {
       this.add_item(item);
     });
+
     this.eventBus.on("update_customer", (customer) => {
       this.customer = customer;
     });
+
     this.eventBus.on("fetch_customer_details", () => {
       this.fetch_customer_details();
     });
+
     this.eventBus.on("clear_invoice", () => {
       this.clear_invoice();
     });
+
     this.eventBus.on("load_invoice", (data) => {
       this.load_invoice(data);
     });
+
     this.eventBus.on("load_order", (data) => {
       this.new_order(data);
-      // this.eventBus.emit("set_pos_coupons", data.posa_coupons);
     });
+
     this.eventBus.on("set_offers", (data) => {
       this.posOffers = data;
     });
+
     this.eventBus.on("update_invoice_offers", (data) => {
       this.updateInvoiceOffers(data);
     });
+
     this.eventBus.on("update_invoice_coupons", (data) => {
       this.posa_coupons = data;
       this.handelOffers();
     });
+
     this.eventBus.on("set_all_items", (data) => {
       this.allItems = data;
       this.items.forEach((item) => {
         this.update_item_detail(item);
       });
     });
+
     this.eventBus.on("load_return_invoice", (data) => {
-      // Handle loading of return invoice and set all related fields
       console.log("Invoice component received load_return_invoice event with data:", data);
       this.load_invoice(data.invoice_doc);
-      // Explicitly mark as return invoice
       this.invoiceType = "Return";
       this.invoiceTypes = ["Return"];
       this.invoice_doc.is_return = 1;
-      // Ensure negative values for returns
+
       if (this.items && this.items.length) {
         this.items.forEach(item => {
-          // Ensure item quantities are negative
           if (item.qty > 0) item.qty = -Math.abs(item.qty);
           if (item.stock_qty > 0) item.stock_qty = -Math.abs(item.stock_qty);
         });
       }
+
       if (data.return_doc) {
         console.log("Return against existing invoice:", data.return_doc.name);
-        // Ensure negative discount amounts
         this.discount_amount = data.return_doc.discount_amount > 0 ?
           -Math.abs(data.return_doc.discount_amount) :
           data.return_doc.discount_amount;
@@ -5519,31 +5794,24 @@ export default {
           -Math.abs(data.return_doc.additional_discount_percentage) :
           data.return_doc.additional_discount_percentage;
         this.return_doc = data.return_doc;
-        // Set return_against reference
         this.invoice_doc.return_against = data.return_doc.name;
       } else {
         console.log("Return without invoice reference");
-        // For return without invoice, reset discount values
         this.discount_amount = 0;
         this.additional_discount_percentage = 0;
       }
-      console.log("Invoice state after loading return:", {
-        invoiceType: this.invoiceType,
-        is_return: this.invoice_doc.is_return,
-        items: this.items.length,
-        customer: this.customer
-      });
     });
+
     this.eventBus.on("set_new_line", (data) => {
       this.new_line = data;
     });
-    if (this.pos_profile.posa_allow_multi_currency) {
-      this.fetch_available_currencies();
-    }
+
     // Listen for reset_posting_date to reset posting date after invoice submission
     this.eventBus.on("reset_posting_date", () => {
       this.posting_date = frappe.datetime.nowdate();
     });
+
+    // Initialize offer storage
     this.loadOfferStorage();
     this.cleanupOfferStorage();
   },
