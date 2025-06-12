@@ -354,67 +354,148 @@ export default {
       }
     },
     enter_event() {
-      let match = false;
-      if (!this.filtered_items.length || !this.first_search) {
-        return;
+  let match = false;
+  if (!this.filtered_items.length || !this.first_search) {
+    return;
+  }
+  const qty = this.get_item_qty(this.first_search);
+  const new_item = { ...this.filtered_items[0] };
+  new_item.qty = flt(qty);
+  
+  // Handle barcode matching
+  new_item.item_barcode.forEach((element) => {
+    if (this.search == element.barcode) {
+      new_item.uom = element.posa_uom;
+      match = true;
+    }
+  });
+  
+  // Handle serial number matching
+  if (
+    !new_item.to_set_serial_no &&
+    new_item.has_serial_no &&
+    this.pos_profile.posa_search_serial_no
+  ) {
+    new_item.serial_no_data.forEach((element) => {
+      if (this.search && element.serial_no == this.search) {
+        new_item.to_set_serial_no = this.first_search;
+        match = true;
       }
-      const qty = this.get_item_qty(this.first_search);
-      const new_item = { ...this.filtered_items[0] };
-      new_item.qty = flt(qty);
-      new_item.item_barcode.forEach((element) => {
-        if (this.search == element.barcode) {
-          new_item.uom = element.posa_uom;
-          match = true;
-        }
-      });
-      if (
-        !new_item.to_set_serial_no &&
-        new_item.has_serial_no &&
-        this.pos_profile.posa_search_serial_no
-      ) {
-        new_item.serial_no_data.forEach((element) => {
-          if (this.search && element.serial_no == this.search) {
-            new_item.to_set_serial_no = this.first_search;
-            match = true;
-          }
-        });
+    });
+  }
+  if (this.flags.serial_no) {
+    new_item.to_set_serial_no = this.flags.serial_no;
+  }
+  
+  // Handle batch number matching with custom_qty - prioritize flags.batch_no
+  if (this.flags.batch_no) {
+    new_item.to_set_batch_no = this.flags.batch_no;
+    new_item.batch_no = this.flags.batch_no;
+    // Check for custom_qty when batch_no is set via flags
+    this.getBatchCustomQty(this.flags.batch_no, new_item);
+    return; // Exit early since we're handling this asynchronously
+  }
+  
+  // Only check batch_no_data if flags.batch_no is not set
+  if (
+    !new_item.to_set_batch_no &&
+    new_item.has_batch_no &&
+    this.pos_profile.posa_search_batch_no
+  ) {
+    let batchFound = false;
+    new_item.batch_no_data.forEach((element) => {
+      if (this.search && element.batch_no == this.search && !batchFound) {
+        new_item.to_set_batch_no = this.first_search;
+        new_item.batch_no = this.first_search;
+        match = true;
+        batchFound = true;
+        
+        // Fetch batch document to get custom_qty
+        this.getBatchCustomQty(this.first_search, new_item);
       }
-      if (this.flags.serial_no) {
-        new_item.to_set_serial_no = this.flags.serial_no;
-      }
-      if (
-        !new_item.to_set_batch_no &&
-        new_item.has_batch_no &&
-        this.pos_profile.posa_search_batch_no
-      ) {
-        new_item.batch_no_data.forEach((element) => {
-          if (this.search && element.batch_no == this.search) {
-            new_item.to_set_batch_no = this.first_search;
-            new_item.batch_no = this.first_search;
-            match = true;
-          }
-        });
-      }
-      if (this.flags.batch_no) {
-        new_item.to_set_batch_no = this.flags.batch_no;
-      }
-      if (match) {
-        this.add_item(new_item);
-        this.flags.serial_no = null;
-        this.flags.batch_no = null;
-        this.qty = 1;
-        this.$refs.debounce_search.focus();
+    });
+    if (batchFound) {
+      return; // Exit early since we're handling this asynchronously
+    }
+  }
+  
+  // If match found and not a batch (which is handled asynchronously), add the item
+  if (match) {
+    this.add_item(new_item);
+    this.flags.serial_no = null;
+    this.flags.batch_no = null;
+    this.qty = 1;
+    this.$refs.debounce_search.focus();
 
-
-         // ✅ Clear the search inputs
+    // Clear the search inputs
     this.search = "";
     this.first_search = "";
     this.search_backup = "";
 
-    // ✅ Refocus the search input
+    // Refocus the search input
     this.$refs.debounce_search?.focus();
-      }
+  }
+},
+
+getBatchCustomQty(batch_no, new_item) {
+  const vm = this;
+  
+  frappe.call({
+    method: "frappe.client.get",
+    args: {
+      doctype: "Batch",
+      name: batch_no
     },
+    callback: function(r) {
+      if (r.message && r.message.custom_qty) {
+        // Set the quantity from batch's custom_qty field
+        new_item.qty = flt(r.message.custom_qty);
+        
+        // Also update the component's qty field for future scans
+        vm.qty = flt(r.message.custom_qty);
+        
+        console.log(`Batch ${batch_no} custom_qty: ${r.message.custom_qty}`);
+      } else {
+        // If no custom_qty found, use the default quantity
+        new_item.qty = flt(vm.qty);
+        console.log(`No custom_qty found for batch ${batch_no}, using default qty: ${vm.qty}`);
+      }
+      
+      // Now add the item with the correct quantity
+      vm.add_item(new_item);
+      vm.flags.serial_no = null;
+      vm.flags.batch_no = null;
+      vm.qty = 1;
+      vm.$refs.debounce_search.focus();
+
+      // Clear the search inputs
+      vm.search = "";
+      vm.first_search = "";
+      vm.search_backup = "";
+
+      // Refocus the search input
+      vm.$refs.debounce_search?.focus();
+    },
+    error: function(err) {
+      console.error("Error fetching batch details:", err);
+      // Fallback to default quantity if there's an error
+      new_item.qty = flt(vm.qty);
+      vm.add_item(new_item);
+      vm.flags.serial_no = null;
+      vm.flags.batch_no = null;
+      vm.qty = 1;
+      vm.$refs.debounce_search.focus();
+
+      // Clear the search inputs
+      vm.search = "";
+      vm.first_search = "";
+      vm.search_backup = "";
+
+      // Refocus the search input
+      vm.$refs.debounce_search?.focus();
+    }
+  });
+},
     search_onchange: _.debounce(function(newSearchTerm) {
         const vm = this;
         if(newSearchTerm) vm.search = newSearchTerm;
