@@ -1578,6 +1578,7 @@ autoApplyOffers(availableOffers) {
       doc.set_posting_time = 1;
       doc.posting_date = this.posting_date;
       if (this.pos_profile.custom_discount_account) {
+        doc.is_cash_or_non_trade_discount = 1;
         doc.additional_discount_account = this.pos_profile.custom_discount_account;
       }
 
