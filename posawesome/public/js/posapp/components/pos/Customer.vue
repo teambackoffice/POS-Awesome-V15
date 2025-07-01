@@ -2,16 +2,17 @@
   <!-- ? Disable dropdown if either readonly or loadingCustomers is true -->
   <div class="customer-input-wrapper">
     <v-autocomplete ref="customerDropdown" class="customer-autocomplete sleek-field" density="compact" clearable
-      variant="solo" color="primary" :label="frappe._('Customer')" v-model="internalCustomer" :items="customers"
-      item-title="customer_name" item-value="name" bg-color="white" :no-data-text="__('Customers not found')"
-      hide-details :customFilter="customFilter" :disabled="readonly || loadingCustomers"
+      variant="solo" color="primary" :label="frappe._('Customer')" v-model="internalCustomer" :items="filteredCustomers"
+      item-title="customer_name" item-value="name" :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" :no-data-text="__('Customers not found')"
+      hide-details :customFilter="() => true" :disabled="readonly || loadingCustomers"
       :menu-props="{ closeOnContentClick: false }" @update:menu="onCustomerMenuToggle"
-      @update:modelValue="onCustomerChange" @keydown.enter="handleEnter">
+      @update:modelValue="onCustomerChange" @update:search="onCustomerSearch" @keydown.enter="handleEnter"
+      :virtual-scroll="true" :virtual-scroll-item-height="48">
       <!-- Edit icon (left) -->
       <template #prepend-inner>
         <v-tooltip text="Edit customer">
-          <template #activator="{ on, attrs }">
-            <v-icon v-bind="attrs" v-on="on" class="icon-button" @mousedown.prevent.stop @click.stop="edit_customer">
+          <template #activator="{ props }">
+            <v-icon v-bind="props" class="icon-button" @mousedown.prevent.stop @click.stop="edit_customer">
               mdi-account-edit
             </v-icon>
           </template>
@@ -21,8 +22,8 @@
       <!-- Add icon (right) -->
       <template #append-inner>
         <v-tooltip text="Add new customer">
-          <template #activator="{ on, attrs }">
-            <v-icon v-bind="attrs" v-on="on" class="icon-button" @mousedown.prevent.stop @click.stop="new_customer">
+          <template #activator="{ props }">
+            <v-icon v-bind="props" class="icon-button" @mousedown.prevent.stop @click.stop="new_customer">
               mdi-plus
             </v-icon>
           </template>
@@ -82,6 +83,37 @@
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
 }
 
+/* Dark mode styling */
+:deep(.dark-theme) .customer-autocomplete,
+:deep(.v-theme--dark) .customer-autocomplete,
+::v-deep(.dark-theme) .customer-autocomplete,
+::v-deep(.v-theme--dark) .customer-autocomplete {
+  /* Use surface color for dark mode */
+  background-color: #1E1E1E !important;
+}
+
+:deep(.dark-theme) .customer-autocomplete :deep(.v-field__input),
+:deep(.v-theme--dark) .customer-autocomplete :deep(.v-field__input),
+:deep(.dark-theme) .customer-autocomplete :deep(input),
+:deep(.v-theme--dark) .customer-autocomplete :deep(input),
+:deep(.dark-theme) .customer-autocomplete :deep(.v-label),
+:deep(.v-theme--dark) .customer-autocomplete :deep(.v-label),
+::v-deep(.dark-theme) .customer-autocomplete .v-field__input,
+::v-deep(.v-theme--dark) .customer-autocomplete .v-field__input,
+::v-deep(.dark-theme) .customer-autocomplete input,
+::v-deep(.v-theme--dark) .customer-autocomplete input,
+::v-deep(.dark-theme) .customer-autocomplete .v-label,
+::v-deep(.v-theme--dark) .customer-autocomplete .v-label {
+  color: #fff !important;
+}
+
+:deep(.dark-theme) .customer-autocomplete :deep(.v-field__overlay),
+:deep(.v-theme--dark) .customer-autocomplete :deep(.v-field__overlay),
+::v-deep(.dark-theme) .customer-autocomplete .v-field__overlay,
+::v-deep(.v-theme--dark) .customer-autocomplete .v-field__overlay {
+  background-color: #1E1E1E !important;
+}
+
 .icon-button {
   cursor: pointer;
   font-size: 20px;
@@ -99,6 +131,7 @@
 
 <script>
 import UpdateCustomer from './UpdateCustomer.vue';
+import { getCustomerStorage, setCustomerStorage } from '../../../offline.js';
 
 export default {
   props: {
@@ -114,11 +147,35 @@ export default {
     isMenuOpen: false,           // Tracks whether dropdown menu is open
     readonly: false,
     customer_info: {},           // Used for edit modal
-    loadingCustomers: false      // ? New state to track loading status
+    loadingCustomers: false,     // ? New state to track loading status
+    customerSearch: ''          // Search text
   }),
 
   components: {
     UpdateCustomer,
+  },
+
+  computed: {
+    isDarkTheme() {
+      return this.$theme.current === 'dark';
+    },
+
+    filteredCustomers() {
+      const search = this.customerSearch.toLowerCase();
+      let results = this.customers;
+      if (search) {
+        results = results.filter(cust => {
+          return (
+            (cust.customer_name && cust.customer_name.toLowerCase().includes(search)) ||
+            (cust.tax_id && cust.tax_id.toLowerCase().includes(search)) ||
+            (cust.email_id && cust.email_id.toLowerCase().includes(search)) ||
+            (cust.mobile_no && cust.mobile_no.toLowerCase().includes(search)) ||
+            (cust.name && cust.name.toLowerCase().includes(search))
+          );
+        });
+      }
+      return results;
+    }
   },
 
   methods: {
@@ -160,6 +217,10 @@ export default {
       }
     },
 
+    onCustomerSearch(val) {
+      this.customerSearch = val || '';
+    },
+
     // Pressing Enter in input
     handleEnter(event) {
       const inputText = event.target.value?.toLowerCase() || '';
@@ -187,8 +248,13 @@ export default {
       var vm = this;
       if (this.customers.length > 0) return;
 
-      if (vm.pos_profile.posa_local_storage && localStorage.customer_storage) {
-        vm.customers = JSON.parse(localStorage.getItem('customer_storage'));
+      if (vm.pos_profile.posa_local_storage && getCustomerStorage().length) {
+        try {
+          vm.customers = getCustomerStorage();
+        } catch (e) {
+          console.error('Failed to parse customer cache:', e);
+          vm.customers = [];
+        }
       }
 
       this.loadingCustomers = true; // ? Start loading
@@ -202,12 +268,15 @@ export default {
             vm.customers = r.message;
 
             if (vm.pos_profile.posa_local_storage) {
-              localStorage.setItem('customer_storage', '');
-              localStorage.setItem('customer_storage', JSON.stringify(r.message));
+              setCustomerStorage(r.message);
             }
           }
           vm.loadingCustomers = false; // ? Stop loading
         },
+        error: function (err) {
+          console.error('Failed to fetch customers:', err);
+          vm.loadingCustomers = false; // Ensure field is re-enabled on failure
+        }
       });
     },
 
@@ -218,22 +287,19 @@ export default {
     edit_customer() {
       this.eventBus.emit('open_update_customer', this.customer_info);
     },
-
-    customFilter(itemText, queryText, itemRow) {
-      const item = itemRow.raw;
-      const searchText = queryText.toLowerCase();
-
-      return (
-        (item.customer_name?.toLowerCase().includes(searchText)) ||
-        (item.tax_id?.toLowerCase().includes(searchText)) ||
-        (item.email_id?.toLowerCase().includes(searchText)) ||
-        (item.mobile_no?.toLowerCase().includes(searchText)) ||
-        (item.name?.toLowerCase().includes(searchText))
-      );
-    },
   },
 
   created() {
+    // Load cached customers immediately for offline use
+    if (getCustomerStorage().length) {
+      try {
+        this.customers = getCustomerStorage();
+      } catch (e) {
+        console.error('Failed to parse customer cache:', e);
+        this.customers = [];
+      }
+    }
+
     this.$nextTick(() => {
       this.eventBus.on('register_pos_profile', (pos_profile) => {
         this.pos_profile = pos_profile;
@@ -251,7 +317,18 @@ export default {
       });
 
       this.eventBus.on('add_customer_to_list', (customer) => {
-        this.customers.push(customer);
+        const index = this.customers.findIndex(
+          (c) => c.name === customer.name
+        );
+        if (index !== -1) {
+          // Replace existing entry to avoid duplicates after update
+          this.customers.splice(index, 1, customer);
+        } else {
+          this.customers.push(customer);
+        }
+        if (this.pos_profile.posa_local_storage) {
+          setCustomerStorage(this.customers);
+        }
         this.customer = customer.name;
         this.internalCustomer = customer.name;
         this.eventBus.emit('update_customer', customer.name);

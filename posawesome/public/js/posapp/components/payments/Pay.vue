@@ -2,8 +2,11 @@
   <div fluid>
     <v-row v-show="!dialog">
       <v-col md="8" cols="12" class="pb-2 pr-0">
-        <v-card class="main mx-auto bg-grey-lighten-5 mt-3 p-3 pb-16 overflow-y-auto"
-          style="max-height: 94vh; height: 94vh">
+        <v-card
+          :class="['main mx-auto mt-3 p-3 pb-16 overflow-y-auto', isDarkTheme ? '' : 'bg-grey-lighten-5']"
+          :style="isDarkTheme ? 'background-color:#1E1E1E' : ''"
+          style="max-height: 94vh; height: 94vh"
+        >
           <Customer></Customer>
           <v-divider></v-divider>
           <div>
@@ -29,7 +32,7 @@
             </v-row>
             <v-row align="center" no-gutters class="mb-1">
               <v-col md="4" cols="12">
-                <v-select density="compact" variant="outlined" hide-details clearable bg-color="white"
+                <v-select density="compact" variant="outlined" hide-details clearable :bg-color="isDarkTheme ? '#1E1E1E' : 'white'"
                   v-model="pos_profile_search" :items="pos_profiles_list" item-value="name"
                   label="Select POS Profile"></v-select>
               </v-col>
@@ -133,11 +136,11 @@
             <v-row align="center" no-gutters class="mb-1">
               <v-col md="4" cols="12" class="mr-1">
                 <v-text-field density="compact" variant="outlined" color="primary" :label="frappe._('Search by Name')"
-                  bg-color="white" hide-details v-model="mpesa_search_name" clearable></v-text-field>
+                  :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" hide-details v-model="mpesa_search_name" clearable></v-text-field>
               </v-col>
               <v-col md="4" cols="12" class="mr-1">
                 <v-text-field density="compact" variant="outlined" color="primary" :label="frappe._('Search by Mobile')"
-                  bg-color="white" hide-details v-model="mpesa_search_mobile" clearable></v-text-field>
+                  :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" hide-details v-model="mpesa_search_mobile" clearable></v-text-field>
               </v-col>
               <v-col> </v-col>
               <v-col md="3" cols="12">
@@ -159,7 +162,11 @@
         </v-card>
       </v-col>
       <v-col md="4" cols="12" class="pb-3">
-        <v-card class="invoices mx-auto bg-grey-lighten-5 mt-3 p-3" style="max-height: 94vh; height: 94vh">
+        <v-card
+          :class="['invoices mx-auto mt-3 p-3', isDarkTheme ? '' : 'bg-grey-lighten-5']"
+          :style="isDarkTheme ? 'background-color:#1E1E1E' : ''"
+          style="max-height: 94vh; height: 94vh"
+        >
           <strong>
             <h4 class="text-primary">Totals</h4>
             <v-row>
@@ -167,7 +174,7 @@
                 <span>{{ __("Total Invoices:") }}</span>
               </v-col>
               <v-col md="5">
-                <v-text-field class="p-0 m-0" density="compact" color="primary" bg-color="white" hide-details
+                <v-text-field class="p-0 m-0 dark-field" density="compact" color="primary" :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" hide-details
                   :model-value="formatCurrency(total_selected_invoices)" readonly flat
                   :prefix="currencySymbol(pos_profile.currency)"></v-text-field>
                 <small v-if="selected_invoices.length" class="text-primary">{{ selected_invoices.length }} invoice(s) selected</small>
@@ -177,7 +184,7 @@
             <v-row v-if="total_selected_payments">
               <v-col md="7" class="mt-1"><span>{{ __("Total Payments:") }}</span></v-col>
               <v-col md="5">
-                <v-text-field class="p-0 m-0" density="compact" color="primary" bg-color="white" hide-details
+                <v-text-field class="p-0 m-0 dark-field" density="compact" color="primary" :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" hide-details
                   :model-value="formatCurrency(total_selected_payments)" readonly flat
                   :prefix="currencySymbol(pos_profile.currency)"></v-text-field>
               </v-col>
@@ -186,7 +193,7 @@
             <v-row v-if="total_selected_mpesa_payments">
               <v-col md="7" class="mt-1"><span>{{ __("Total Mpesa:") }}</span></v-col>
               <v-col md="5">
-                <v-text-field class="p-0 m-0" density="compact" color="primary" bg-color="white" hide-details
+                <v-text-field class="p-0 m-0 dark-field" density="compact" color="primary" :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" hide-details
                   :model-value="formatCurrency(total_selected_mpesa_payments)" readonly flat
                   :prefix="currencySymbol(pos_profile.currency)"></v-text-field>
               </v-col>
@@ -201,7 +208,7 @@
                 <v-col md="5">
                   <div class="d-flex align-center">
                     <div class="mr-1 text-primary">{{ currencySymbol(pos_profile.currency) }}</div>
-                    <v-text-field class="p-0 m-0" density="compact" color="primary" bg-color="white"
+                    <v-text-field class="p-0 m-0 dark-field" density="compact" color="primary" :bg-color="isDarkTheme ? '#1E1E1E' : 'white'"
                       hide-details v-model="method.amount" type="number" flat 
                       @input="$forceUpdate()"></v-text-field>
                   </div>
@@ -215,7 +222,7 @@
                 <h4 class="text-primary mt-1">{{ __("Difference:") }}</h4>
               </v-col>
               <v-col md="5">
-                <v-text-field class="p-0 m-0" density="compact" color="primary" bg-color="white" hide-details
+                <v-text-field class="p-0 m-0 dark-field" density="compact" color="primary" :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" hide-details
                   :model-value="formatCurrency(total_of_diff)" readonly flat
                   :prefix="currencySymbol(pos_profile.currency)"></v-text-field>
               </v-col>
@@ -246,6 +253,8 @@
 import format from "../../format";
 import Customer from "../pos/Customer.vue";
 import UpdateCustomer from "../pos/UpdateCustomer.vue";
+import { getOpeningStorage, setOpeningStorage, initPromise, saveOfflinePayment, syncOfflinePayments, getPendingOfflinePaymentCount, isOffline, getCustomerStorage } from "../../../offline.js";
+import { silentPrint } from "../../plugins/print.js";
 
 export default {
   mixins: [format],
@@ -405,8 +414,9 @@ export default {
   },
 
   methods: {
-    check_opening_entry() {
+    async check_opening_entry() {
       var vm = this;
+      await initPromise;
       return frappe
         .call("posawesome.posawesome.api.posapp.check_opening_shift", {
           user: frappe.session.user,
@@ -419,7 +429,12 @@ export default {
             vm.eventBus.emit("payments_register_pos_profile", r.message);
             vm.eventBus.emit("set_company", r.message.company);
             this.set_payment_methods();
-            
+            try {
+              setOpeningStorage(r.message);
+            } catch (e) {
+              console.error("Failed to cache opening data", e);
+            }
+
             // Initialize pos_profile_search as empty
             this.pos_profile_search = "";
             
@@ -438,8 +453,45 @@ export default {
             this.get_outstanding_invoices();
             this.get_draft_mpesa_payments_register();
           } else {
+            const data = getOpeningStorage();
+            if (data) {
+                this.pos_profile = data.pos_profile;
+                this.pos_opening_shift = data.pos_opening_shift;
+                this.company = data.company.name;
+                vm.eventBus.emit("payments_register_pos_profile", data);
+                vm.eventBus.emit("set_company", data.company);
+                this.set_payment_methods();
+                this.payment_methods_list = [];
+                this.pos_profile.payments.forEach((element) => {
+                  this.payment_methods_list.push(element.mode_of_payment);
+                });
+                this.get_available_pos_profiles();
+                this.get_outstanding_invoices();
+                this.get_draft_mpesa_payments_register();
+                return;
+            }
             this.create_opening_voucher();
           }
+        })
+        .catch(() => {
+          const data = getOpeningStorage();
+          if (data) {
+              this.pos_profile = data.pos_profile;
+              this.pos_opening_shift = data.pos_opening_shift;
+              this.company = data.company.name;
+              vm.eventBus.emit("payments_register_pos_profile", data);
+              vm.eventBus.emit("set_company", data.company);
+              this.set_payment_methods();
+              this.payment_methods_list = [];
+              this.pos_profile.payments.forEach((element) => {
+                this.payment_methods_list.push(element.mode_of_payment);
+              });
+              this.get_available_pos_profiles();
+              this.get_outstanding_invoices();
+              this.get_draft_mpesa_payments_register();
+              return;
+          }
+          this.create_opening_voucher();
         });
     },
     get_available_pos_profiles() {
@@ -461,26 +513,44 @@ export default {
     create_opening_voucher() {
       this.dialog = true;
     },
-    fetch_customer_details() {
+    async fetch_customer_details() {
       var vm = this;
-      if (this.customer_name) {
-        frappe.call({
+      if (!this.customer_name) return;
+
+      // When offline, attempt to load details from cached customers
+      if (isOffline()) {
+        try {
+          const cached = getCustomerStorage().find(
+            (c) => c.name === vm.customer_name
+          );
+          if (cached) {
+            vm.customer_info = { ...cached };
+            vm.set_mpesa_search_params();
+            vm.eventBus.emit("set_customer_info_to_edit", vm.customer_info);
+          }
+        } catch (error) {
+          console.error("Failed to fetch cached customer", error);
+        }
+        return;
+      }
+
+      try {
+        const r = await frappe.call({
           method: "posawesome.posawesome.api.posapp.get_customer_info",
           args: {
             customer: vm.customer_name,
           },
-          async: false,
-          callback: (r) => {
-            const message = r.message;
-            if (!r.exc) {
-              vm.customer_info = {
-                ...message,
-              };
-              vm.set_mpesa_search_params();
-              vm.eventBus.emit("set_customer_info_to_edit", vm.customer_info);
-            }
-          },
         });
+        const message = r.message;
+        if (!r.exc) {
+          vm.customer_info = {
+            ...message,
+          };
+          vm.set_mpesa_search_params();
+          vm.eventBus.emit("set_customer_info_to_edit", vm.customer_info);
+        }
+      } catch (error) {
+        console.error("Failed to fetch customer details", error);
       }
     },
     onInvoiceSelected(event) {
@@ -496,6 +566,13 @@ export default {
       this.invoices_loading = true;
       // Reset selection completely
       this.selected_invoices = [];
+
+      if (isOffline()) {
+        this.outstanding_invoices = [];
+        this.invoices_loading = false;
+        return;
+      }
+
       return frappe
         .call(
           "posawesome.posawesome.api.payment_entry.get_outstanding_invoices",
@@ -521,6 +598,12 @@ export default {
       if (!this.pos_profile.posa_allow_reconcile_payments) return;
       this.unallocated_payments_loading = true;
       if (!this.customer_name) {
+        this.unallocated_payments = [];
+        this.unallocated_payments_loading = false;
+        return;
+      }
+
+      if (isOffline()) {
         this.unallocated_payments = [];
         this.unallocated_payments_loading = false;
         return;
@@ -556,6 +639,12 @@ export default {
       if (!this.pos_profile.posa_allow_mpesa_reconcile_payments) return;
       const vm = this;
       this.mpesa_payments_loading = true;
+
+      if (isOffline()) {
+        this.mpesa_payments = [];
+        this.mpesa_payments_loading = false;
+        return;
+      }
       return frappe
         .call("posawesome.posawesome.api.m_pesa.get_mpesa_draft_payments", {
           company: vm.company,
@@ -613,16 +702,9 @@ export default {
         return;
       }
       
-      // Check if we have selected invoices
-      if (this.selected_invoices.length == 0) {
-        this.isSubmitting = false;
-        frappe.throw(__("Please select an invoice"));
-        return;
-      }
-      
       // Calculate payment values
-      let total_payments = this.total_selected_payments + 
-                          this.total_selected_mpesa_payments + 
+      let total_payments = this.total_selected_payments +
+                          this.total_selected_mpesa_payments +
                           this.total_payment_methods;
       
       if (total_payments <= 0) {
@@ -652,6 +734,23 @@ export default {
       payload.total_selected_mpesa_payments = flt(
         this.total_selected_mpesa_payments
       );
+
+      if (isOffline()) {
+        try {
+          saveOfflinePayment({ args: { payload } });
+          vm.eventBus.emit('show_message', { title: __('Payment saved offline'), color: 'warning' });
+          vm.clear_all(false);
+          vm.customer_name = customer;
+          vm.get_outstanding_invoices();
+          vm.get_unallocated_payments();
+          vm.set_mpesa_search_params();
+          vm.get_draft_mpesa_payments_register();
+        } catch (error) {
+          frappe.msgprint(__('Cannot Save Offline Payment: ') + (error.message || __('Unknown error')));
+        }
+        vm.isSubmitting = false;
+        return;
+      }
 
       frappe.call({
         method: "posawesome.posawesome.api.payment_entry.process_pos_payment",
@@ -686,16 +785,9 @@ export default {
         return;
       }
     
-      // Check if we have selected invoices
-      if (this.selected_invoices.length == 0) {
-        this.isSubmitting = false;
-        frappe.throw(__("Please select an invoice"));
-        return;
-      }
-      
       // Calculate payment values
-      let total_payments = this.total_selected_payments + 
-                          this.total_selected_mpesa_payments + 
+      let total_payments = this.total_selected_payments +
+                          this.total_selected_mpesa_payments +
                           this.total_payment_methods;
       
       if (total_payments <= 0) {
@@ -725,6 +817,23 @@ export default {
       payload.total_selected_mpesa_payments = flt(
         this.total_selected_mpesa_payments
       );
+
+      if (isOffline()) {
+        try {
+          saveOfflinePayment({ args: { payload } });
+          vm.eventBus.emit('show_message', { title: __('Payment saved offline'), color: 'warning' });
+          vm.clear_all(false);
+          vm.customer_name = customer;
+          vm.get_outstanding_invoices();
+          vm.get_unallocated_payments();
+          vm.set_mpesa_search_params();
+          vm.get_draft_mpesa_payments_register();
+        } catch (error) {
+          frappe.msgprint(__('Cannot Save Offline Payment: ') + (error.message || __('Unknown error')));
+        }
+        vm.isSubmitting = false;
+        return;
+      }
 
       frappe.call({
         method: "posawesome.posawesome.api.payment_entry.process_pos_payment",
@@ -801,16 +910,39 @@ export default {
       }
 
       // Use simplest URL possible to avoid errors
-      const url = 
+      const url =
         frappe.urllib.get_base_url() +
         "/printview?doctype=Payment%20Entry" +
         "&name=" + payment_name +
         "&trigger_print=1";
 
       console.log("Opening printing URL:", url);
-      
-      // Open in new window/tab
-      window.open(url, '_blank');
+
+      if (this.pos_profile?.posa_silent_print) {
+        silentPrint(url);
+      } else {
+        window.open(url, '_blank');
+      }
+    },
+
+    async syncPendingPayments() {
+      const pending = getPendingOfflinePaymentCount();
+      if (pending) {
+        this.eventBus.emit('show_message', {
+          title: `${pending} payment${pending > 1 ? 's' : ''} pending for sync`,
+          color: 'warning'
+        });
+      }
+      if (isOffline()) {
+        return;
+      }
+      const result = await syncOfflinePayments();
+      if (result && result.synced) {
+        this.eventBus.emit('show_message', {
+          title: `${result.synced} offline payment${result.synced > 1 ? 's' : ''} synced`,
+          color: 'success'
+        });
+      }
     },
   },
 
@@ -873,8 +1005,8 @@ export default {
     total_of_diff() {
       // Calculate difference between invoice total and payment total
       const invoiceTotal = this.total_selected_invoices || 0;
-      const paymentTotal = (this.total_selected_payments || 0) + 
-                          (this.total_selected_mpesa_payments || 0) + 
+      const paymentTotal = (this.total_selected_payments || 0) +
+                          (this.total_selected_mpesa_payments || 0) +
                           (this.total_payment_methods || 0);
       
       console.log('Difference calculation:', {
@@ -887,6 +1019,15 @@ export default {
       
       return flt(invoiceTotal - paymentTotal);
     },
+    isDarkTheme() {
+      return this.$theme.current === 'dark';
+    }
+  },
+
+  created() {
+    this.syncPendingPayments();
+    this.eventBus.on('network-online', this.syncPendingPayments);
+    this.eventBus.on('server-online', this.syncPendingPayments);
   },
 
   mounted: function () {
@@ -908,11 +1049,43 @@ export default {
   beforeUnmount() {
     this.eventBus.off("update_customer");
     this.eventBus.off("fetch_customer_details");
+    this.eventBus.off('network-online', this.syncPendingPayments);
+    this.eventBus.off('server-online', this.syncPendingPayments);
   },
 };
 </script>
 
 <style>
+/* Dark mode input styling */
+:deep(.dark-theme) .dark-field,
+:deep(.v-theme--dark) .dark-field,
+::v-deep(.dark-theme) .dark-field,
+::v-deep(.v-theme--dark) .dark-field {
+  background-color: #1E1E1E !important;
+}
+
+:deep(.dark-theme) .dark-field :deep(.v-field__input),
+:deep(.v-theme--dark) .dark-field :deep(.v-field__input),
+:deep(.dark-theme) .dark-field :deep(input),
+:deep(.v-theme--dark) .dark-field :deep(input),
+:deep(.dark-theme) .dark-field :deep(.v-label),
+:deep(.v-theme--dark) .dark-field :deep(.v-label),
+::v-deep(.dark-theme) .dark-field .v-field__input,
+::v-deep(.v-theme--dark) .dark-field .v-field__input,
+::v-deep(.dark-theme) .dark-field input,
+::v-deep(.v-theme--dark) .dark-field input,
+::v-deep(.dark-theme) .dark-field .v-label,
+::v-deep(.v-theme--dark) .dark-field .v-label {
+  color: #fff !important;
+}
+
+:deep(.dark-theme) .dark-field :deep(.v-field__overlay),
+:deep(.v-theme--dark) .dark-field :deep(.v-field__overlay),
+::v-deep(.dark-theme) .dark-field .v-field__overlay,
+::v-deep(.v-theme--dark) .dark-field .v-field__overlay {
+  background-color: #1E1E1E !important;
+}
+
 input[total_of_diff] {
   text-align: right;
 }
