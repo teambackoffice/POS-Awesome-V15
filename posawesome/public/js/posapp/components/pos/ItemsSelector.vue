@@ -666,29 +666,29 @@ export default {
       }
     },
     getItemsHeaders() {
-      const items_headers = [
-        {
-          title: __("Name"),
-          align: "start",
-          sortable: true,
-          key: "item_name",
-        },
-        {
-          title: __("Code"),
-          align: "start",
-          sortable: true,
-          key: "item_code",
+  const items_headers = [
+    {
+      title: __("Name"),
+      align: "start",
+      sortable: true,
+      key: "item_name",
+    },
+    {
+      title: __("Code"),
+      align: "start",
+      sortable: true,
+      key: "item_code",
         },
         { title: __("Rate"), key: "rate", align: "start" },
         { title: __("Available QTY"), key: "actual_qty", align: "start" },
         { title: __("UOM"), key: "stock_uom", align: "start" },
       ];
-      if (!this.pos_profile.posa_display_item_code) {
+  if (!this.pos_profile.posa_display_item_code) {
         items_headers.splice(1, 1);
-      }
-
-      return items_headers;
-    },
+  }
+  
+  return items_headers;
+},
     click_item_row(event, { item }) {
       this.add_item(item)
     },
@@ -709,14 +709,14 @@ export default {
         // Ensure UOMs are initialized before adding the item
         if (!item.item_uoms || item.item_uoms.length === 0) {
           // If UOMs are not available, fetch them first
-          this.update_items_details([item]);
+      this.update_items_details([item]);
 
-          // Add stock UOM as fallback
-          if (!item.item_uoms || item.item_uoms.length === 0) {
-            item.item_uoms = [{ uom: item.stock_uom, conversion_factor: 1.0 }];
-          }
+    // Add stock UOM as fallback
+    if (!item.item_uoms || item.item_uoms.length === 0) {
+      item.item_uoms = [{ uom: item.stock_uom, conversion_factor: 1.0 }];
+    }
         }
-
+       
         // Convert rate if multi-currency is enabled
         if (this.pos_profile.posa_allow_multi_currency &&
           this.selected_currency !== this.pos_profile.currency) {
@@ -738,6 +738,10 @@ export default {
         }
         this.eventBus.emit("add_item", item);
         this.qty = 1;
+        this.search = "";
+        this.first_search = "";
+        this.search_backup = "";
+        this.$refs.debounce_search?.focus();
       }
     },
     enter_event() {
@@ -795,6 +799,12 @@ export default {
         this.$refs.debounce_search.focus();
       }
     },
+    clearAndFocusSearch() {
+    this.search = "";
+    this.first_search = "";
+    this.search_backup = "";
+    this.$refs.debounce_search?.focus();
+  },
     search_onchange: _.debounce(function (newSearchTerm) {
       const vm = this;
       if (newSearchTerm) vm.search = newSearchTerm;
@@ -852,12 +862,12 @@ export default {
       return search_term;
     },
     esc_event() {
-      this.search = null;
-      this.first_search = null;
-      this.search_backup = null;
-      this.qty = 1;
-      this.$refs.debounce_search.focus();
-    },
+  this.search = "";
+  this.first_search = "";
+  this.search_backup = "";
+  this.qty = 1;
+  this.$refs.debounce_search?.focus();
+},
     update_items_details(items) {
       const vm = this;
       if (!items || !items.length) return;
@@ -1119,11 +1129,11 @@ export default {
       return combinations;
     },
     clearSearch() {
-      this.search_backup = this.first_search;
-      this.first_search = "";
-      this.search = "";
-      // No need to call get_items() again
-    },
+    this.search_backup = this.first_search;
+    this.search = "";
+    this.first_search = "";
+    this.$refs.debounce_search?.focus();
+},
 
     restoreSearch() {
       if (this.first_search === "") {
@@ -1154,6 +1164,8 @@ export default {
       // Clear any previous search
       this.search = '';
       this.first_search = '';
+      this.search_backup = '';
+
 
       // Set the scanned code as search term
       this.first_search = scannedCode;
@@ -1223,7 +1235,10 @@ export default {
 
       // Clear search after successful addition
       setTimeout(() => {
-        this.clearSearch();
+        this.search = "";
+        this.first_search = "";
+        this.search_backup = "";
+        this.$refs.debounce_search?.focus();
       }, 1000);
     },
     showMultipleItemsDialog(items, scannedCode) {
