@@ -7,6 +7,7 @@ from __future__ import unicode_literals
 import frappe
 from frappe import _
 from frappe.model.mapper import get_mapped_doc
+from erpnext.stock.get_item_details import get_item_price
 from frappe.utils import flt, add_days
 from posawesome.posawesome.doctype.pos_coupon.pos_coupon import update_coupon_code_count
 from posawesome.posawesome.api.posapp import get_company_domain
@@ -25,6 +26,7 @@ def validate(doc, method):
 def before_submit(doc, method):
     add_loyalty_point(doc)
     create_sales_order(doc)
+    create_delivery_note(doc)
     update_coupon(doc, "used")
 
 
@@ -89,6 +91,113 @@ def create_sales_order(doc):
                 doc.items[i].sales_order = sales_order_doc.name
                 doc.items[i].so_detail = item.name
                 i += 1
+
+
+def create_delivery_note(doc, method=None):
+    """Automatically create a Delivery Note upon Sales Invoice submission (POS only)"""
+    
+    if doc.update_stock or doc.is_return:
+        return
+
+    if not (
+        doc.posa_pos_opening_shift and
+        doc.pos_profile and
+        doc.is_pos and
+        doc.posa_delivery_date and
+        frappe.get_value("POS Profile", doc.pos_profile, "posa_allow_sales_order")
+    ):
+        return
+
+    def is_stock_available(item):
+        return (frappe.db.get_value(
+            "Bin", {"item_code": item.item_code, "warehouse": item.warehouse}, "actual_qty"
+        ) or 0) >= item.qty
+
+    try:
+        dn = frappe.new_doc("Delivery Note")
+        dn.update({
+            "customer": doc.customer,
+            "posting_date": doc.posting_date,
+            "posting_time": doc.posting_time,
+            "taxes_and_charges": doc.taxes_and_charges,
+            "company": doc.company,
+            "flags": {
+                "ignore_permissions": True,
+                "ignore_account_permission": True
+            }
+        })
+
+        all_sufficient_stock = True
+
+        # Add items
+        for item in doc.items:
+            dn.append("items", {
+                "item_code": item.item_code,
+                "uom": item.uom,
+                "qty": item.qty,
+                "rate": item.rate,
+                "warehouse": item.warehouse,
+                "against_sales_invoice": doc.name,
+                "si_detail": item.name,
+                "cost_center": item.cost_center
+            })
+            if not is_stock_available(item):
+                all_sufficient_stock = False
+
+        # Add taxes
+        for tax in doc.get("taxes", []):
+            dn.append("taxes", {
+                "charge_type": tax.charge_type,
+                "account_head": tax.account_head,
+                "description": tax.description,
+                "rate": tax.rate,
+                "tax_amount": tax.tax_amount,
+                "total": tax.total,
+                "cost_center": tax.cost_center
+            })
+
+        # Add sales team
+        for sp in doc.get("sales_team", []):
+            dn.append("sales_team", {
+                "sales_person": sp.sales_person,
+                "allocated_percentage": sp.allocated_percentage
+            })
+
+        dn.save()
+
+        if all_sufficient_stock:
+            try:
+                dn.submit()
+                url = frappe.utils.get_url_to_form(dn.doctype, dn.name)
+                frappe.msgprint(
+                    _(f"Delivery Note Created at <a href='{url}'>{dn.name}</a>"),
+                    title="Delivery Note Created",
+                    indicator="green",
+                    alert=True
+                )
+            except Exception as e:
+                frappe.msgprint(
+                    f"Delivery Note {dn.name} saved as draft due to submission error: {e}",
+                    title="Delivery Note Saved as Draft",
+                    indicator="orange",
+                    alert=True
+                )
+        else:
+            frappe.msgprint(
+                f"Delivery Note {dn.name} saved as draft due to insufficient stock.",
+                title="Delivery Note Saved as Draft",
+                indicator="orange",
+                alert=True
+            )
+
+    except Exception as e:
+        frappe.msgprint(
+            f"Error creating delivery note: {e}",
+            title="Delivery Note Creation Failed",
+            indicator="red",
+            alert=True
+        )
+
 
 
 def make_sales_order(source_name, target_doc=None, ignore_permissions=True):
@@ -265,3 +374,69 @@ def validate_shift(doc):
                     shift.name
                 )
             )
+
+
+@frappe.whitelist()
+def get_item_price_for_uom(item_code, price_list, uom, customer=None, company=None, currency=None, conversion_factor=1):
+    """
+    Get item price for a specific UOM, with fallback to stock UOM conversion if needed.
+    
+    Args:
+        item_code (str): Item code to get price for
+        price_list (str): Price list to check
+        uom (str): Unit of measure to get price for
+        customer (str, optional): Customer for price list filtering
+        company (str, optional): Company for price list filtering
+        currency (str, optional): Currency for price list filtering
+        conversion_factor (float, optional): Conversion factor (default: 1)
+    
+    Returns:
+        dict: Dictionary containing price information or None if not found
+    """
+    
+    
+    item_price_args = {
+        "item_code": item_code,
+        "price_list": price_list,
+        "uom": uom,
+        "customer": customer,
+        "company": company,
+        "currency": currency
+    }
+    
+    # Get item price for specific UOM
+    price_list_rate = get_item_price(item_price_args, item_code, ignore_party=True)
+    
+    if price_list_rate:
+        return {
+            "price_list_rate": price_list_rate[0][1],  # price_list_rate from the tuple
+            "uom": uom,
+            "found_specific_uom": True
+        }
+    
+    item_doc = frappe.get_doc("Item", item_code)
+    stock_uom = item_doc.stock_uom
+    
+    if stock_uom != uom:
+        item_price_args["uom"] = stock_uom
+        base_price = get_item_price(item_price_args, item_code, ignore_party=True)
+        
+        if base_price:
+            uom_conversion = frappe.db.get_value(
+                "UOM Conversion Detail",
+                {"parent": item_code, "uom": uom},
+                "conversion_factor"
+            )
+            
+            if uom_conversion:
+                converted_price = base_price[0][1] * float(uom_conversion)
+                return {
+                    "price_list_rate": converted_price,
+                    "uom": uom,
+                    "found_specific_uom": False,
+                    "converted_from_stock_uom": True,
+                    "stock_uom_price": base_price[0][1],
+                    "conversion_factor": uom_conversion
+                }
+    
+    return None

@@ -13,7 +13,8 @@
           <v-col class="pb-0">
             <v-text-field density="compact" clearable autofocus variant="solo" color="primary"
               :label="frappe._('Search Items')" hint="Search by item code, serial number, batch no or barcode"
-              hide-details v-model="debounce_search" @keydown.esc="esc_event" @keydown.enter="search_onchange"
+              hide-details v-model="debounce_search" @keydown.esc="esc_event" 
+              @keydown.enter="handleBarcodeSearch()" 
               @click:clear="clearSearch" prepend-inner-icon="mdi-magnify" @focus="handleItemSearchFocus"
               ref="debounce_search">
               <!-- Add camera scan button if enabled -->
@@ -274,6 +275,266 @@ export default {
   },
 
   methods: {
+    /**
+     * Unified method to handle barcode search from both manual input and scanning
+     */
+    handleBarcodeSearch(searchValue = null, isScanned = false) {
+      // Use provided value or get from search field
+      const barcodeValue = searchValue || this.first_search || this.search;
+      
+      if (!barcodeValue || barcodeValue.trim() === '') {
+        console.warn('No barcode value provided');
+        return;
+      }
+
+      console.log(`Processing ${isScanned ? 'scanned' : 'manual'} barcode:`, barcodeValue);
+
+      // Set the search field values
+      this.first_search = barcodeValue;
+      this.search = barcodeValue;
+      this.search_backup = '';
+
+      // Show loading state briefly for better UX
+      if (isScanned) {
+        frappe.show_alert({
+          message: `Searching for: ${barcodeValue}`,
+          indicator: 'blue'
+        }, 2);
+      }
+
+      // First, try to find exact barcode match
+      let foundItem = this.findItemByBarcode(barcodeValue);
+
+      if (foundItem) {
+        console.log('Found item by exact barcode match:', foundItem);
+        this.addItemFromSearch(foundItem, barcodeValue);
+        return;
+      }
+
+      // If no exact barcode match, try item code match
+      foundItem = this.items.find(item => 
+        item.item_code === barcodeValue || 
+        item.item_code.toLowerCase() === barcodeValue.toLowerCase()
+      );
+
+      if (foundItem) {
+        console.log('Found item by item code match:', foundItem);
+        this.addItemFromSearch(foundItem, barcodeValue);
+        return;
+      }
+
+      // For scale barcodes (if configured)
+      if (this.pos_profile.posa_scale_barcode_start && 
+          barcodeValue.startsWith(this.pos_profile.posa_scale_barcode_start)) {
+        const scaledItem = this.handleScaleBarcode(barcodeValue);
+        if (scaledItem) {
+          this.addItemFromSearch(scaledItem, barcodeValue);
+          return;
+        }
+      }
+
+      // Check serial numbers if enabled
+      if (this.pos_profile.posa_search_serial_no) {
+        foundItem = this.findItemBySerialNumber(barcodeValue);
+        if (foundItem) {
+          console.log('Found item by serial number:', foundItem);
+          foundItem.to_set_serial_no = barcodeValue;
+          this.flags.serial_no = barcodeValue;
+          this.addItemFromSearch(foundItem, barcodeValue);
+          return;
+        }
+      }
+
+      // Check batch numbers if enabled
+      if (this.pos_profile.posa_search_batch_no) {
+        foundItem = this.findItemByBatchNumber(barcodeValue);
+        if (foundItem) {
+          console.log('Found item by batch number:', foundItem);
+          foundItem.to_set_batch_no = barcodeValue;
+          foundItem.batch_no = barcodeValue;
+          this.flags.batch_no = barcodeValue;
+          this.addItemFromSearch(foundItem, barcodeValue);
+          return;
+        }
+      }
+
+      // If still no match, try partial name search
+      const partialMatches = this.searchItemsByName(barcodeValue);
+      
+      if (partialMatches.length === 1) {
+        console.log('Found item by name search:', partialMatches[0]);
+        this.addItemFromSearch(partialMatches[0], barcodeValue);
+      } else if (partialMatches.length > 1) {
+        console.log('Multiple items found, showing first match:', partialMatches[0]);
+        this.addItemFromSearch(partialMatches[0], barcodeValue);
+      } else {
+        // No item found
+        this.handleItemNotFound(barcodeValue, isScanned);
+      }
+    },
+
+    findItemByBarcode(barcode) {
+      return this.items.find(item => {
+        // Check main barcode
+        if (item.barcode === barcode) return true;
+        
+        // Check item_barcode array
+        if (item.item_barcode && Array.isArray(item.item_barcode)) {
+          return item.item_barcode.some(bc => bc.barcode === barcode);
+        }
+        
+        // Check barcodes array (alternative structure)
+        if (item.barcodes && Array.isArray(item.barcodes)) {
+          return item.barcodes.some(bc => bc.barcode === barcode);
+        }
+        
+        return false;
+      });
+    },
+
+    findItemBySerialNumber(serialNo) {
+      return this.items.find(item => {
+        if (item.serial_no_data && Array.isArray(item.serial_no_data)) {
+          return item.serial_no_data.some(sn => sn.serial_no === serialNo);
+        }
+        return false;
+      });
+    },
+
+    findItemByBatchNumber(batchNo) {
+      return this.items.find(item => {
+        if (item.batch_no_data && Array.isArray(item.batch_no_data)) {
+          return item.batch_no_data.some(bn => bn.batch_no === batchNo);
+        }
+        return false;
+      });
+    },
+
+    searchItemsByName(searchTerm) {
+      const term = searchTerm.toLowerCase();
+      return this.items.filter(item =>
+        item.item_name.toLowerCase().includes(term) ||
+        item.item_code.toLowerCase().includes(term)
+      );
+    },
+
+    handleScaleBarcode(barcode) {
+      const itemCode = barcode.substr(0, 7);
+      const foundItem = this.items.find(item => 
+        item.item_code === itemCode || 
+        item.barcode === itemCode
+      );
+      
+      if (foundItem) {
+        const qty = this.get_item_qty(barcode);
+        foundItem.qty = qty;
+        return foundItem;
+      }
+      
+      return null;
+    },
+
+    addItemFromSearch(item, originalSearch) {
+      if (!item) return;
+
+      // Clone the item to avoid modifying the original
+      const itemToAdd = { ...item };
+
+      // Set quantity from the qty field or default to 1
+      const qtyVal = this.qty != null ? this.qty : 1;
+      itemToAdd.qty = Math.abs(qtyVal);
+
+      // Handle barcode-specific UOM if found
+      if (item.item_barcode && Array.isArray(item.item_barcode)) {
+        const barcodeMatch = item.item_barcode.find(bc => bc.barcode === originalSearch);
+        if (barcodeMatch && barcodeMatch.posa_uom) {
+          itemToAdd.uom = barcodeMatch.posa_uom;
+          this.eventBus.emit("calc_uom", itemToAdd, barcodeMatch.posa_uom);
+        }
+      }
+
+      // Check stock availability
+      if (itemToAdd.actual_qty === 0 && this.pos_profile.posa_display_items_in_stock) {
+        this.eventBus.emit("show_message", {
+          title: `No stock available for ${itemToAdd.item_name}`,
+          color: "warning",
+        });
+        this.update_items_details([itemToAdd]);
+        return;
+      }
+
+      // Ensure UOMs are available
+      if (!itemToAdd.item_uoms || itemToAdd.item_uoms.length === 0) {
+        const cachedUoms = getItemUOMs(itemToAdd.item_code);
+        if (cachedUoms.length > 0) {
+          itemToAdd.item_uoms = cachedUoms;
+        } else if (itemToAdd.stock_uom) {
+          itemToAdd.item_uoms = [{ uom: itemToAdd.stock_uom, conversion_factor: 1.0 }];
+        }
+      }
+
+      // Handle multi-currency conversion
+      if (this.pos_profile.posa_allow_multi_currency &&
+          this.selected_currency !== this.pos_profile.currency) {
+        itemToAdd.base_rate = itemToAdd.rate;
+        itemToAdd.base_price_list_rate = itemToAdd.price_list_rate;
+        itemToAdd.rate = this.getConvertedRate(itemToAdd);
+        itemToAdd.price_list_rate = this.getConvertedRate(itemToAdd);
+        itemToAdd.currency = this.selected_currency;
+      }
+
+      // Add the item to cart
+      this.eventBus.emit("add_item", itemToAdd);
+
+      // Show success feedback
+      frappe.show_alert({
+        message: `Added: ${itemToAdd.item_name}`,
+        indicator: 'green'
+      }, 3);
+
+      // Clear search and reset form
+      this.clearSearchForm();
+
+      // Focus back to search field
+      this.$nextTick(() => {
+        this.$refs.debounce_search?.focus();
+      });
+    },
+
+    handleItemNotFound(searchValue, isScanned = false) {
+      const message = `No item found for: ${searchValue}`;
+      
+      console.warn(message);
+      
+      this.eventBus.emit("show_message", {
+        title: message,
+        color: "error",
+      });
+
+      frappe.utils.play_sound("error");
+
+      frappe.show_alert({
+        message: message,
+        indicator: 'red'
+      }, 5);
+
+      if (isScanned) {
+        setTimeout(() => {
+          this.clearSearchForm();
+        }, 2000);
+      }
+    },
+
+    clearSearchForm() {
+      this.search = "";
+      this.first_search = "";
+      this.search_backup = "";
+      this.qty = 1;
+      
+      this.flags.serial_no = null;
+      this.flags.batch_no = null;
+    },
+
     refreshPricesForVisibleItems() {
       const vm = this;
       if (!vm.filtered_items || vm.filtered_items.length === 0) return;
@@ -369,6 +630,135 @@ export default {
         }
       });
     },
+
+    async getProductBundle(item_code) {
+    try {
+      const response = await new Promise((resolve, reject) => {
+        frappe.call({
+          method: "posawesome.posawesome.api.posapp.get_product_bundle",
+          args: {
+            item_code: item_code,
+            pos_profile: this.pos_profile
+          },
+          callback: function(r) {
+            resolve(r);
+          },
+          error: function(err) {
+            reject(err);
+          }
+        });
+      });
+      
+      return response.message;
+    } catch (error) {
+      console.error('Error fetching product bundle:', error);
+      throw error;
+    }
+  },
+
+  async processProductBundle(item_code, quantity = 1) {
+  if (!this.pos_profile.custom_product_bundle) {
+    return false;
+  }
+  
+  try {
+    console.log(`Processing product bundle for item: ${item_code}`);
+    const product_bundle = await this.getProductBundle(item_code);
+    
+    if (product_bundle && product_bundle.items && Array.isArray(product_bundle.items)) {
+      console.log('Product bundle found:', product_bundle);
+      
+      // Show loading message
+      this.eventBus.emit("show_message", {
+        title: `Processing product bundle: ${product_bundle.name}`,
+        color: "info",
+      });
+      
+      let allItemsAdded = true;
+      let addedCount = 0;
+      
+      // Process each bundle item
+      for (const bundle_item of product_bundle.items) {
+        try {
+          // Find the item details from your items list
+          const item_details = this.items.find(item => item.item_code === bundle_item.item_code);
+          
+          if (item_details) {
+            // Calculate the total quantity for this bundle item
+            const bundle_qty = (bundle_item.qty || 1) * quantity;
+            
+            // Create enhanced bundle item with all necessary properties
+            const enhanced_bundle_item = {
+              ...item_details, // Copy all properties from the original item
+              qty: bundle_qty,
+              uom: bundle_item.uom || item_details.stock_uom,
+              is_bundle_item: true,
+              parent_bundle: item_code,
+              custom_bundle_id: product_bundle.name,
+              bundle_item_description: bundle_item.description || '',
+              // Preserve the original rate and other pricing info
+              rate: item_details.rate,
+              price_list_rate: item_details.price_list_rate || item_details.rate
+            };
+            
+            console.log(`Adding bundle item: ${bundle_item.item_code} with qty: ${bundle_qty}`);
+            
+            // Add the bundle item to cart
+            this.eventBus.emit("add_item", enhanced_bundle_item);
+            addedCount++;
+            
+            // Small delay to prevent overwhelming the system
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+          } else {
+            console.warn(`Bundle item not found in items list: ${bundle_item.item_code}`);
+            this.eventBus.emit("show_message", {
+              title: `Bundle item not available: ${bundle_item.item_code}`,
+              color: "warning",
+            });
+            allItemsAdded = false;
+          }
+        } catch (itemError) {
+          console.error(`Error processing bundle item ${bundle_item.item_code}:`, itemError);
+          allItemsAdded = false;
+        }
+      }
+      
+      // Show success/warning message based on results
+      if (addedCount > 0) {
+        const messageColor = allItemsAdded ? "success" : "warning";
+        const messageText = allItemsAdded 
+          ? `Product bundle "${product_bundle.name}" added successfully (${addedCount} items)`
+          : `Product bundle "${product_bundle.name}" partially added (${addedCount} items)`;
+          
+        this.eventBus.emit("show_message", {
+          title: messageText,
+          color: messageColor,
+        });
+        
+        return true;
+      } else {
+        this.eventBus.emit("show_message", {
+          title: `No items could be added from bundle: ${product_bundle.name}`,
+          color: "error",
+        });
+        return false;
+      }
+      
+    } else {
+      console.log(`No product bundle found for item: ${item_code}`);
+      return false;
+    }
+    
+  } catch (error) {
+    console.error('Error processing product bundle:', error);
+    this.eventBus.emit("show_message", {
+      title: `Failed to process product bundle: ${error.message}`,
+      color: "error",
+    });
+    return false;
+  }
+},
 
     show_offers() {
       this.eventBus.emit("show_offers", "true");
@@ -555,7 +945,7 @@ export default {
               }
 
               if (vm.pos_profile.pose_use_limit_search) {
-                vm.enter_event();
+                vm.handleBarcodeSearch();
               }
             } else if (ev.data.type === "error") {
               console.error('Item worker parse error:', ev.data.error);
@@ -632,7 +1022,7 @@ export default {
                 }
               }
               if (vm.pos_profile.pose_use_limit_search) {
-                vm.enter_event();
+                vm.handleBarcodeSearch();
               }
             }
           }
@@ -666,33 +1056,33 @@ export default {
       }
     },
     getItemsHeaders() {
-  const items_headers = [
-    {
-      title: __("Name"),
-      align: "start",
-      sortable: true,
-      key: "item_name",
-    },
-    {
-      title: __("Code"),
-      align: "start",
-      sortable: true,
-      key: "item_code",
+      const items_headers = [
+        {
+          title: __("Name"),
+          align: "start",
+          sortable: true,
+          key: "item_name",
+        },
+        {
+          title: __("Code"),
+          align: "start",
+          sortable: true,
+          key: "item_code",
         },
         { title: __("Rate"), key: "rate", align: "start" },
         { title: __("Available QTY"), key: "actual_qty", align: "start" },
         { title: __("UOM"), key: "stock_uom", align: "start" },
       ];
-  if (!this.pos_profile.posa_display_item_code) {
+      if (!this.pos_profile.posa_display_item_code) {
         items_headers.splice(1, 1);
-  }
-  
-  return items_headers;
-},
+      }
+      
+      return items_headers;
+    },
     click_item_row(event, { item }) {
       this.add_item(item)
     },
-    add_item(item) {
+    async add_item(item) {
       item = { ...item };
       if (item.has_variants) {
         this.eventBus.emit("open_variants_model", item, this.items);
@@ -709,13 +1099,31 @@ export default {
         // Ensure UOMs are initialized before adding the item
         if (!item.item_uoms || item.item_uoms.length === 0) {
           // If UOMs are not available, fetch them first
-      this.update_items_details([item]);
+          this.update_items_details([item]);
 
-    // Add stock UOM as fallback
-    if (!item.item_uoms || item.item_uoms.length === 0) {
-      item.item_uoms = [{ uom: item.stock_uom, conversion_factor: 1.0 }];
-    }
+          // Add stock UOM as fallback
+          if (!item.item_uoms || item.item_uoms.length === 0) {
+            item.item_uoms = [{ uom: item.stock_uom, conversion_factor: 1.0 }];
+          }
         }
+
+        // Check for Product Bundle FIRST before processing regular item
+    if (this.pos_profile.custom_product_bundle) {
+      console.log('Checking if item is a product bundle:', item.item_code);
+      
+      const quantity = Math.abs(this.qty != null ? this.qty : 1);
+      const bundleProcessed = await this.processProductBundle(item.item_code, quantity);
+      
+      if (bundleProcessed) {
+        this.qty = 1;
+        // ✅ Clear search and refocus after bundle processing
+        this.search = "";
+        this.first_search = "";
+        this.search_backup = "";
+        this.$refs.debounce_search?.focus();
+        return; // Exit early since bundle was processed
+      }
+    }
        
         // Convert rate if multi-currency is enabled
         if (this.pos_profile.posa_allow_multi_currency &&
@@ -745,66 +1153,17 @@ export default {
       }
     },
     enter_event() {
-      let match = false;
-      if (!this.filtered_items.length || !this.first_search) {
+      if (!this.first_search || this.filtered_items.length === 0) {
         return;
       }
-      const qty = this.get_item_qty(this.first_search);
-      const new_item = { ...this.filtered_items[0] };
-      new_item.qty = flt(qty);
-      new_item.item_barcode.forEach((element) => {
-        if (this.search == element.barcode) {
-          new_item.uom = element.posa_uom;
-          // Call calc_uom to update rate based on new UOM
-          this.eventBus.emit("calc_uom", new_item, element.posa_uom);
-          match = true;
-        }
-      });
-      if (
-        !new_item.to_set_serial_no &&
-        new_item.has_serial_no &&
-        this.pos_profile.posa_search_serial_no
-      ) {
-        new_item.serial_no_data.forEach((element) => {
-          if (this.search && element.serial_no == this.search) {
-            new_item.to_set_serial_no = this.first_search;
-            match = true;
-          }
-        });
-      }
-      if (this.flags.serial_no) {
-        new_item.to_set_serial_no = this.flags.serial_no;
-      }
-      if (
-        !new_item.to_set_batch_no &&
-        new_item.has_batch_no &&
-        this.pos_profile.posa_search_batch_no
-      ) {
-        new_item.batch_no_data.forEach((element) => {
-          if (this.search && element.batch_no == this.search) {
-            new_item.to_set_batch_no = this.first_search;
-            new_item.batch_no = this.first_search;
-            match = true;
-          }
-        });
-      }
-      if (this.flags.batch_no) {
-        new_item.to_set_batch_no = this.flags.batch_no;
-      }
-      if (match) {
-        this.add_item(new_item);
-        this.flags.serial_no = null;
-        this.flags.batch_no = null;
-        this.qty = 1;
-        this.$refs.debounce_search.focus();
-      }
+      this.handleBarcodeSearch(this.first_search, false);
     },
     clearAndFocusSearch() {
-    this.search = "";
-    this.first_search = "";
-    this.search_backup = "";
-    this.$refs.debounce_search?.focus();
-  },
+      this.search = "";
+      this.first_search = "";
+      this.search_backup = "";
+      this.$refs.debounce_search?.focus();
+    },
     search_onchange: _.debounce(function (newSearchTerm) {
       const vm = this;
       if (newSearchTerm) vm.search = newSearchTerm;
@@ -815,7 +1174,7 @@ export default {
         // Save the current filtered items before search to maintain quantity data
         const current_items = [...vm.filtered_items];
         if (vm.search && vm.search.length >= 3) {
-          vm.enter_event();
+          vm.handleBarcodeSearch();
         }
 
         // After search, update quantities for newly filtered items
@@ -862,12 +1221,12 @@ export default {
       return search_term;
     },
     esc_event() {
-  this.search = "";
-  this.first_search = "";
-  this.search_backup = "";
-  this.qty = 1;
-  this.$refs.debounce_search?.focus();
-},
+      this.search = "";
+      this.first_search = "";
+      this.search_backup = "";
+      this.qty = 1;
+      this.$refs.debounce_search?.focus();
+    },
     update_items_details(items) {
       const vm = this;
       if (!items || !items.length) return;
@@ -1096,15 +1455,7 @@ export default {
       }
     },
     trigger_onscan(sCode) {
-      if (this.filtered_items.length == 0) {
-        this.eventBus.emit("show_message", {
-          title: `No Item has this barcode "${sCode}"`,
-          color: "error",
-        });
-        frappe.utils.play_sound("error");
-      } else {
-        this.enter_event();
-      }
+      this.handleBarcodeSearch(sCode, true);
     },
     generateWordCombinations(inputString) {
       const words = inputString.split(" ");
@@ -1129,11 +1480,11 @@ export default {
       return combinations;
     },
     clearSearch() {
-    this.search_backup = this.first_search;
-    this.search = "";
-    this.first_search = "";
-    this.$refs.debounce_search?.focus();
-},
+      this.search_backup = this.first_search;
+      this.search = "";
+      this.first_search = "";
+      this.$refs.debounce_search?.focus();
+    },
 
     restoreSearch() {
       if (this.first_search === "") {
@@ -1160,149 +1511,8 @@ export default {
     },
     onBarcodeScanned(scannedCode) {
       console.log('Barcode scanned:', scannedCode);
-
-      // Clear any previous search
+      this.handleBarcodeSearch(scannedCode, true);
       this.search = '';
-      this.first_search = '';
-      this.search_backup = '';
-
-
-      // Set the scanned code as search term
-      this.first_search = scannedCode;
-      this.search = scannedCode;
-
-      // Show scanning feedback
-      frappe.show_alert({
-        message: `Scanning for: ${scannedCode}`,
-        indicator: 'blue'
-      }, 2);
-
-      // Enhanced item search and submission logic
-      setTimeout(() => {
-        this.processScannedItem(scannedCode);
-      }, 300);
-    },
-    processScannedItem(scannedCode) {
-      // First try to find exact match by barcode
-      let foundItem = this.items.find(item =>
-        item.barcode === scannedCode ||
-        item.item_code === scannedCode ||
-        (item.barcodes && item.barcodes.some(bc => bc.barcode === scannedCode))
-      );
-
-      if (foundItem) {
-        console.log('Found item by exact match:', foundItem);
-        this.addScannedItemToInvoice(foundItem, scannedCode);
-        return;
-      }
-
-      // If no exact match, try partial search
-      const searchResults = this.searchItemsByCode(scannedCode);
-
-      if (searchResults.length === 1) {
-        console.log('Found item by search:', searchResults[0]);
-        this.addScannedItemToInvoice(searchResults[0], scannedCode);
-      } else if (searchResults.length > 1) {
-        // Multiple matches - show selection dialog
-        this.showMultipleItemsDialog(searchResults, scannedCode);
-      } else {
-        // No matches found
-        this.handleItemNotFound(scannedCode);
-      }
-    },
-    searchItemsByCode(code) {
-      return this.items.filter(item => {
-        const searchTerm = code.toLowerCase();
-        return (
-          item.item_code.toLowerCase().includes(searchTerm) ||
-          item.item_name.toLowerCase().includes(searchTerm) ||
-          (item.barcode && item.barcode.toLowerCase().includes(searchTerm)) ||
-          (item.barcodes && item.barcodes.some(bc => bc.barcode.toLowerCase().includes(searchTerm)))
-        );
-      });
-    },
-    addScannedItemToInvoice(item, scannedCode) {
-      console.log('Adding scanned item to invoice:', item, scannedCode);
-
-      // Use existing add_item method with enhanced feedback
-      this.add_item(item);
-
-      // Show success message
-      frappe.show_alert({
-        message: `Added: ${item.item_name}`,
-        indicator: 'green'
-      }, 3);
-
-      // Clear search after successful addition
-      setTimeout(() => {
-        this.search = "";
-        this.first_search = "";
-        this.search_backup = "";
-        this.$refs.debounce_search?.focus();
-      }, 1000);
-    },
-    showMultipleItemsDialog(items, scannedCode) {
-      // Create a dialog to let user choose from multiple matches
-      const dialog = new frappe.ui.Dialog({
-        title: __('Multiple Items Found'),
-        fields: [
-          {
-            fieldtype: 'HTML',
-            fieldname: 'items_html',
-            options: this.generateItemSelectionHTML(items, scannedCode)
-          }
-        ],
-        primary_action_label: __('Cancel'),
-        primary_action: () => dialog.hide()
-      });
-
-      dialog.show();
-
-      // Add click handlers for item selection
-      setTimeout(() => {
-        items.forEach((item, index) => {
-          const button = dialog.$wrapper.find(`[data-item-index="${index}"]`);
-          button.on('click', () => {
-            this.addScannedItemToInvoice(item, scannedCode);
-            dialog.hide();
-          });
-        });
-      }, 100);
-    },
-    generateItemSelectionHTML(items, scannedCode) {
-      let html = `<div class="mb-3"><strong>Scanned Code:</strong> ${scannedCode}</div>`;
-      html += '<div class="item-selection-list">';
-
-      items.forEach((item, index) => {
-        html += `
-          <div class="item-option p-3 mb-2 border rounded cursor-pointer" data-item-index="${index}" style="border: 1px solid #ddd; cursor: pointer;">
-            <div class="d-flex align-items-center">
-              <img src="${item.image || '/assets/posawesome/js/posapp/components/pos/placeholder-image.png'}" 
-                   style="width: 50px; height: 50px; object-fit: cover; margin-right: 15px;" />
-              <div>
-                <div class="font-weight-bold">${item.item_name}</div>
-                <div class="text-muted small">${item.item_code}</div>
-                <div class="text-primary">${this.format_currency(item.rate, this.pos_profile.currency, this.ratePrecision(item.rate))}</div>
-              </div>
-            </div>
-          </div>
-        `;
-      });
-
-      html += '</div>';
-      return html;
-    },
-    handleItemNotFound(scannedCode) {
-      console.warn('Item not found for scanned code:', scannedCode);
-
-      // Show error message
-      frappe.show_alert({
-        message: `Item not found: ${scannedCode}`,
-        indicator: 'red'
-      }, 5);
-
-      // Keep the search term for manual search
-      this.trigger_onscan(scannedCode);
     },
 
     getConvertedRate(item) {
