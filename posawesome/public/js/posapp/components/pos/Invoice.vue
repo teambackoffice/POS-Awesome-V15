@@ -4,6 +4,76 @@
     <!-- Cancel Sale Confirmation Dialog -->
     <CancelSaleDialog v-model="cancel_dialog" @confirm="cancel_invoice" />
 
+    <!-- Reference Details Dialog -->
+    <v-dialog v-model="reference_dialog" max-width="500" persistent>
+      <v-card>
+        <v-card-title class="text-h5 bg-primary white--text">
+          <v-icon left color="white">mdi-file-document-edit</v-icon>
+          {{ __("Enter Reference Details") }}
+        </v-card-title>
+        
+        <v-card-text class="pt-6 pb-2">
+          <v-container>
+            <v-row>
+              <v-col cols="12">
+                <v-text-field
+                  v-model="reference_no"
+                  :label="__('Reference Number')"
+                  variant="outlined"
+                  density="compact"
+                  color="primary"
+                  prepend-inner-icon="mdi-numeric"
+                  :rules="[v => !!v || __('Reference Number is required')]"
+                  required
+                  hide-details="auto"
+                  autocomplete="off" 
+                  class="mb-3"
+                ></v-text-field>
+              </v-col>
+              
+              <v-col cols="12">
+                <v-text-field
+                  v-model="reference_name"
+                  :label="__('Reference Name')"
+                  variant="outlined"
+                  density="compact"
+                  color="primary"
+                  prepend-inner-icon="mdi-account"
+                  :rules="[v => !!v || __('Reference Name is required')]"
+                  required
+                  hide-details="auto"
+                  autocomplete="off" 
+                ></v-text-field>
+              </v-col>
+            </v-row>
+          </v-container>
+        </v-card-text>
+        <v-card-actions class="px-6 pb-4">
+          <v-spacer></v-spacer>
+          
+          <v-btn
+            color="grey"
+            variant="outlined"
+            @click="cancel_reference_dialog"
+            prepend-icon="mdi-close"
+          >
+            {{ __("Cancel") }}
+          </v-btn>
+          
+          <v-btn
+            color="primary"
+            variant="elevated"
+            @click="confirm_reference_and_proceed"
+            prepend-icon="mdi-credit-card"
+            :disabled="!reference_no || !reference_name"
+            class="ml-3"
+          >
+            {{ __("Proceed to Payment") }}
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- Main Invoice Card (contains all invoice content) -->
     <v-card
       :style="{ height: 'var(--container-height)', maxHeight: 'var(--container-height)', backgroundColor: isDarkTheme ? '#121212' : '' }"
@@ -213,6 +283,9 @@ export default {
       expanded: [], // Array of expanded row IDs
       singleExpand: true, // Only one row expanded at a time
       cancel_dialog: false, // Cancel dialog visibility
+      reference_dialog: false, // Reference dialog visibility
+      reference_no: '', // Reference number field
+      reference_name: '', // Reference name field
       float_precision: 6, // Float precision for calculations
       currency_precision: 6, // Currency precision for display
       new_line: false, // Add new line for item
@@ -256,6 +329,152 @@ export default {
     ...shortcutMethods,
     ...itemMethods,
     ...offerMethods,
+
+    // Reference Dialog Methods
+    show_payment() {
+      // Check if reference details are required
+      if (this.pos_profile.custom_add_reference_details) {
+        console.log('Reference details required - showing dialog');
+        this.reference_no = '';
+        this.reference_name = '';
+        this.reference_dialog = true;
+        return;
+      }
+  
+      // If no reference required, proceed directly to payment
+      this.process_payment();
+    },
+
+    // Add this new method to handle the payment processing
+    async process_payment() {
+      try {
+        let invoice_doc;
+        if (this.invoice_doc.doctype == "Sales Order") {
+          console.log('Processing Sales Order payment');
+          invoice_doc = await this.process_invoice_from_order();
+        } else {
+          console.log('Processing regular invoice');
+          invoice_doc = this.process_invoice();
+        }
+
+        if (!invoice_doc) {
+          console.log('Failed to process invoice');
+          return;
+        }
+
+        // Add reference details to invoice if provided
+        if (this.reference_no || this.reference_name) {
+          invoice_doc.custom_reference_no = this.reference_no;
+          invoice_doc.custom_reference_name = this.reference_name;
+        }
+
+        // Update invoice_doc with current currency info
+        invoice_doc.currency = this.selected_currency || this.pos_profile.currency;
+        invoice_doc.conversion_rate = this.exchange_rate || 1;
+        
+        // Update totals in invoice_doc to match current calculations
+        invoice_doc.total = this.Total;
+        invoice_doc.grand_total = this.subtotal;
+        
+        // Apply rounding to get rounded total
+        invoice_doc.rounded_total = this.roundAmount(this.subtotal);
+        invoice_doc.base_total = this.Total * (1 / this.exchange_rate || 1);
+        invoice_doc.base_grand_total = this.subtotal * (1 / this.exchange_rate || 1);
+        invoice_doc.base_rounded_total = this.roundAmount(invoice_doc.base_grand_total);
+        
+        // Check if this is a return invoice
+        if (this.invoiceType === 'Return' || invoice_doc.is_return) {
+          console.log('Preparing RETURN invoice for payment with:', {
+            is_return: invoice_doc.is_return,
+            invoiceType: this.invoiceType,
+            return_against: invoice_doc.return_against,
+            items: invoice_doc.items.length,
+            grand_total: invoice_doc.grand_total
+          });
+          
+          // For return invoices, explicitly ensure all amounts are negative
+          invoice_doc.is_return = 1;
+          if (invoice_doc.grand_total > 0) invoice_doc.grand_total = -Math.abs(invoice_doc.grand_total);
+          if (invoice_doc.rounded_total > 0) invoice_doc.rounded_total = -Math.abs(invoice_doc.rounded_total);
+          if (invoice_doc.total > 0) invoice_doc.total = -Math.abs(invoice_doc.total);
+          if (invoice_doc.base_grand_total > 0) invoice_doc.base_grand_total = -Math.abs(invoice_doc.base_grand_total);
+          if (invoice_doc.base_rounded_total > 0) invoice_doc.base_rounded_total = -Math.abs(invoice_doc.base_rounded_total);
+          if (invoice_doc.base_total > 0) invoice_doc.base_total = -Math.abs(invoice_doc.base_total);
+          
+          // Ensure all items have negative quantity and amount
+          if (invoice_doc.items && invoice_doc.items.length) {
+            invoice_doc.items.forEach(item => {
+              if (item.qty > 0) item.qty = -Math.abs(item.qty);
+              if (item.stock_qty > 0) item.stock_qty = -Math.abs(item.stock_qty);
+              if (item.amount > 0) item.amount = -Math.abs(item.amount);
+            });
+          }
+        }
+        
+        // Get payments with correct sign (positive/negative)
+        invoice_doc.payments = this.get_payments();
+        console.log('Final payment data:', invoice_doc.payments);
+
+        // Double-check return invoice payments are negative
+        if ((this.invoiceType === 'Return' || invoice_doc.is_return) && invoice_doc.payments.length) {
+          invoice_doc.payments.forEach(payment => {
+            if (payment.amount > 0) payment.amount = -Math.abs(payment.amount);
+            if (payment.base_amount > 0) payment.base_amount = -Math.abs(payment.base_amount);
+          });
+          console.log('Ensured negative payment amounts for return:', invoice_doc.payments);
+        }
+
+        console.log('Showing payment dialog with currency:', invoice_doc.currency);
+        this.eventBus.emit("show_payment", "true");
+        this.eventBus.emit("send_invoice_doc_payment", invoice_doc);
+
+      } catch (error) {
+        console.error('Error in process_payment:', error);
+        this.eventBus.emit("show_message", {
+          title: __("Error processing payment"),
+          color: "error",
+          message: error.message
+        });
+      }
+    },
+
+    // Add this new method to handle reference dialog confirmation
+    async confirm_reference_and_proceed() {
+      try {
+        // Validate reference fields if required
+        if (this.pos_profile.custom_add_reference_details) {
+          if (!this.reference_no || !this.reference_name) {
+            this.eventBus.emit("show_message", {
+              title: __("Please fill in both reference number and reference name"),
+              color: "error"
+            });
+            return;
+          }
+        }
+
+        // Close the reference dialog
+        this.reference_dialog = false;
+
+        // Proceed with payment processing
+        await this.process_payment();
+
+      } catch (error) {
+        console.error('Error in confirm_reference_and_proceed:', error);
+        this.eventBus.emit("show_message", {
+          title: __("Error processing reference details"),
+          color: "error",
+          message: error.message
+        });
+      }
+    },
+
+    // Add this method to handle reference dialog cancellation
+    cancel_reference_dialog() {
+      this.reference_dialog = false;
+      this.reference_no = '';
+      this.reference_name = '';
+    },
+
     initializeItemsHeaders() {
       // Define all available columns
       this.available_columns = [
@@ -780,6 +999,7 @@ export default {
     },
 
     // Add new rounding function
+    // Add new rounding function
     roundAmount(amount) {
       // If multi-currency is enabled and selected currency is different from base currency
       if (this.pos_profile.posa_allow_multi_currency &&
@@ -789,6 +1009,110 @@ export default {
       }
       // For base currency or when multi-currency is disabled, round to nearest integer
       return Math.round(amount);
+    },
+
+    async calc_uom(item, value) {
+      const new_uom = item.item_uoms.find((element) => element.uom == value);
+      if (!new_uom) {
+        this.eventBus.emit("show_message", {
+          title: __("UOM not found"),
+          color: "error",
+        });
+        return;
+      }
+
+      // Store old conversion factor for ratio calculation
+      const old_conversion_factor = item.conversion_factor || 1;
+      
+      // Update conversion factor
+      item.conversion_factor = new_uom.conversion_factor;
+
+      // Reset discount if not offer
+      if (!item.posa_offer_applied) {
+        item.discount_amount = 0;
+        item.discount_percentage = 0;
+      }
+
+      try {
+        // Fetch item price for the specific UOM
+        const response = await frappe.call({
+          method: "posawesome.posawesome.api.invoice.get_item_price_for_uom",
+          args: {
+            item_code: item.item_code,
+            price_list: this.get_price_list(),
+            uom: value,
+            customer: this.customer,
+            company: this.pos_profile.company,
+            currency: this.pos_profile.currency,
+            conversion_factor: item.conversion_factor
+          }
+        });
+
+        if (response && response.message && response.message.price_list_rate) {
+          // Use the fetched price from Item Price
+          const fetched_rate = response.message.price_list_rate;
+          
+          // Set base rates (always in base currency)
+          item.base_rate = fetched_rate;
+          item.base_price_list_rate = fetched_rate;
+          
+          // Convert to selected currency if needed
+          if (this.selected_currency !== this.pos_profile.currency) {
+            // If exchange rate is 300 PKR = 1 USD
+            // To convert PKR to USD: divide by exchange rate
+            item.rate = this.flt(fetched_rate / this.exchange_rate, this.currency_precision);
+            item.price_list_rate = item.rate;
+          } else {
+            item.rate = fetched_rate;
+            item.price_list_rate = fetched_rate;
+          }
+          
+          console.log(`Found Item Price for ${item.item_code} with UOM ${value}: ${fetched_rate}`);
+          
+        } else {
+          // Fallback to conversion factor calculation if no Item Price found
+          console.log(`No Item Price found for ${item.item_code} with UOM ${value}, using conversion factor`);
+          this.fallbackToConversionFactor(item, old_conversion_factor);
+        }
+      } catch (error) {
+        console.error("Error fetching item price for UOM:", error);
+        
+        // Fallback to conversion factor calculation on error
+        this.fallbackToConversionFactor(item, old_conversion_factor);
+        
+        this.eventBus.emit("show_message", {
+          title: __("Could not fetch item price for UOM, using conversion factor"),
+          color: "warning",
+        });
+      }
+
+      // Update item details and force UI update
+      this.calc_stock_qty(item, item.qty);
+      this.$forceUpdate();
+    },
+
+    fallbackToConversionFactor(item, old_conversion_factor) {
+      if (!item.original_base_rate && !item.posa_offer_applied) {
+        item.original_base_rate = item.base_rate / old_conversion_factor;
+        item.original_base_price_list_rate = item.base_price_list_rate / old_conversion_factor;
+      }
+
+      if (item.batch_price) {
+        item.base_rate = item.batch_price * item.conversion_factor;
+        item.base_price_list_rate = item.base_rate;
+      } else if (item.original_base_rate) {
+        item.base_rate = item.original_base_rate * item.conversion_factor;
+        item.base_price_list_rate = item.original_base_price_list_rate * item.conversion_factor;
+      }
+      
+      // Convert to selected currency
+      if (this.selected_currency !== this.pos_profile.currency) {
+        item.rate = this.flt(item.base_rate / this.exchange_rate, this.currency_precision);
+        item.price_list_rate = this.flt(item.base_price_list_rate / this.exchange_rate, this.currency_precision);
+      } else {
+        item.rate = item.base_rate;
+        item.price_list_rate = item.base_price_list_rate;
+      }
     },
 
     // Increase quantity of an item (handles return logic)

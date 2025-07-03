@@ -262,6 +262,11 @@ fixtures = [
                     "POS Profile-posa_allow_mpesa_reconcile_payments",
                     "POS Profile-posa_enable_camera_scanning",
                     "POS Profile-posa_camera_scan_type",
+                    "Sales Invoice Item-custom_bundle_id",
+                    "POS Profile-custom_add_reference_details",
+                    "POS Profile-custom_product_bundle",
+                    "Sales Invoice-custom_reference_name",
+                    "Sales Invoice-custom_reference_no",
                 ),
             ]
         ],
@@ -270,17 +275,17 @@ fixtures = [
         "doctype": "Property Setter",
         "filters": [["name", "in", ("Sales Invoice-posa_pos_opening_shift-no_copy")]],
     },
-    {
-        "doctype": "Custom Field",
-        "filters": [
-            [
-                "name",
-                "in",
-                [
-                    "POS Profile-posa_allow_multi_currency",
-                    "POS Profile-posa_decimal_precision"
-                ]
-            ]
-        ]
-    }
+    # {
+    #     "doctype": "Custom Field",
+    #     "filters": [
+    #         [
+    #             "name",
+    #             "in",
+    #             [
+    #                 "POS Profile-posa_allow_multi_currency",
+    #                 "POS Profile-posa_decimal_precision"
+    #             ]
+    #         ]
+    #     ]
+    # }
 ]

@@ -164,7 +164,7 @@
 
           <!-- Delivery Date and Address (if applicable) -->
           <v-col cols="6" v-if="pos_profile.posa_allow_sales_order && invoiceType === 'Order'">
-            <VueDatePicker v-model="new_delivery_date" model-type="format" format="dd-MM-yyyy" :min-date="new Date()"
+            <VueDatePicker  model-type="format" format="dd-MM-yyyy" :min-date="new Date()"
               auto-apply :dark="isDarkTheme" @update:model-value="update_delivery_date()" />
           </v-col>
           <!-- Shipping Address Selection (if delivery date is set) -->
@@ -421,7 +421,11 @@ export default {
       phone_dialog: false, // Show phone payment dialog
       custom_days_dialog: false, // Show custom days dialog
       custom_days_value: null, // Custom days entry
-      new_delivery_date: null, // New delivery date value
+      
+      // ADDED: New delivery date properties
+      order_delivery_date: null, // Delivery date menu state
+      new_delivery_date: new Date(), // Set today's date as default
+      
       new_po_date: null, // New PO date value
       new_credit_due_date: null, // New credit due date value
       credit_due_days: null, // Number of days until due
@@ -1294,13 +1298,27 @@ export default {
       this.clear_all_amounts();
       this.customer_credit_dict.push(advance);
     },
-    // Update delivery date after selection
+    // UPDATED: Enhanced delivery date update method
     update_delivery_date() {
-      this.invoice_doc.posa_delivery_date = this.formatDate(this.new_delivery_date);
+      if (this.new_delivery_date) {
+        this.invoice_doc.posa_delivery_date = this.formatDate(this.new_delivery_date);
+       
+      } else {
+        // If no date selected, set today's date
+        this.invoice_doc.posa_delivery_date = frappe.datetime.now_date();
+        this.new_delivery_date = new Date();
+      }
+      
       // After setting delivery date, fetch addresses if not already loaded
       if (this.invoice_doc.customer && (!this.addresses || this.addresses.length === 0)) {
         this.get_addresses();
       }
+    },
+    // ADDED: New method to set today as delivery date
+    setTodayAsDeliveryDate() {
+      const today = new Date();
+      this.new_delivery_date = today;
+      this.invoice_doc.posa_delivery_date = this.formatDate(today);
     },
     // Update purchase order date after selection
     update_po_date() {
@@ -1454,6 +1472,15 @@ export default {
         );
         this.is_credit_sale = false;
         this.is_write_off_change = false;
+        
+        // ADDED: Initialize delivery date for orders
+        if (this.pos_profile.posa_allow_sales_order && this.invoiceType === 'Order') {
+          if (!this.invoice_doc.posa_delivery_date) {
+            this.invoice_doc.posa_delivery_date = frappe.datetime.now_date();
+            this.new_delivery_date = new Date();
+          }
+        }
+        
         if (invoice_doc.is_return) {
           this.is_return = true;
           this.is_credit_return = false;
@@ -1501,9 +1528,15 @@ export default {
           this.invoice_doc.posa_notes = null;
           this.invoice_doc.shipping_address_name = null;
         } else if (this.invoice_doc && data === "Order") {
-          // Initialize delivery date to today when switching to Order type
-          this.new_delivery_date = this.formatDateDisplay(frappe.datetime.now_date());
-          this.update_delivery_date();
+          // UPDATED: Enhanced initialization for Order type
+          if (!this.invoice_doc.posa_delivery_date) {
+            // Initialize delivery date to today when switching to Order type
+            this.new_delivery_date = new Date();
+            this.update_delivery_date();
+          } else {
+            // If delivery date already exists, sync it with the date picker
+            this.new_delivery_date = new Date(this.invoice_doc.posa_delivery_date);
+          }
         }
         // Handle return invoices properly
         if (this.invoice_doc && data === "Return") {

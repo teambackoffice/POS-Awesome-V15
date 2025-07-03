@@ -137,6 +137,84 @@ def update_opening_shift_data(data, pos_profile):
     data["stock_settings"] = {}
     data["stock_settings"].update({"allow_negative_stock": allow_negative_stock})
 
+@frappe.whitelist()
+def get_product_bundle(item_code, pos_profile=None):
+    """Get product bundle details for an item code"""
+    try:
+        # Check if the item is a product bundle
+        product_bundle = frappe.db.get_value("Product Bundle", {"new_item_code": item_code}, "name")
+        
+        if not product_bundle:
+            return None
+            
+        # Get the product bundle document
+        bundle_doc = frappe.get_doc("Product Bundle", product_bundle)
+        
+        # Prepare the response
+        bundle_data = {
+            "name": bundle_doc.name,
+            "new_item_code": bundle_doc.new_item_code,
+            "description": bundle_doc.description,
+            "items": []
+        }
+        
+        # Get all items in the bundle
+        for item in bundle_doc.items:
+            bundle_item = {
+                "item_code": item.item_code,
+                "qty": item.qty,
+                "uom": item.uom,
+                "description": item.description,
+                "rate": getattr(item, 'rate', 0),  # Some bundles might have rates
+            }
+            bundle_data["items"].append(bundle_item)
+        
+        return bundle_data
+        
+    except Exception as e:
+        frappe.log_error(f"Error getting product bundle for {item_code}: {str(e)}")
+        return None
+
+
+# Alternative method if you want to check during item loading
+@frappe.whitelist()
+def get_items_with_bundle_info(pos_profile, price_list=None, item_group=None, search_value="", customer=None):
+    """Enhanced get_items method that includes product bundle information"""
+    
+    # First get regular items (use your existing get_items method)
+    items = get_items(pos_profile, price_list, item_group, search_value, customer)
+    
+    if not items:
+        return []
+    
+    # Get all product bundles
+    product_bundles = frappe.db.sql("""
+        SELECT 
+            pb.name,
+            pb.new_item_code,
+            pb.description as bundle_description
+        FROM `tabProduct Bundle` pb
+        WHERE pb.disabled = 0
+    """, as_dict=True)
+    
+    # Create a mapping of item codes to bundle info
+    bundle_map = {}
+    for bundle in product_bundles:
+        bundle_map[bundle.new_item_code] = {
+            "is_product_bundle": True,
+            "bundle_name": bundle.name,
+            "bundle_description": bundle.bundle_description
+        }
+    
+    # Add bundle information to items
+    for item in items:
+        if item.get("item_code") in bundle_map:
+            item.update(bundle_map[item["item_code"]])
+        else:
+            item["is_product_bundle"] = False
+    
+    return items
+
 
 @frappe.whitelist()
 def get_items(
