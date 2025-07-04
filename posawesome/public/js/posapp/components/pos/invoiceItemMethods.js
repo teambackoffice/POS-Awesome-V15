@@ -1766,10 +1766,10 @@ export default {
     calc_uom(item, value) {
       const new_uom = item.item_uoms.find((element) => element.uom == value);
       if (!new_uom) {
-        this.eventBus.emit("show_message", {
-          title: __("UOM not found"),
-          color: "error",
-        });
+        // this.eventBus.emit("show_message", {
+        //   title: __("UOM not found"),
+        //   color: "error",
+        // });
         return;
       }
 
