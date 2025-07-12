@@ -1,13 +1,9 @@
 # -*- coding: utf-8 -*-
 from __future__ import unicode_literals
+import frappe
 
 __version__ = "15.2.2"
 
-try:
-    import frappe
-except ImportError:
-    frappe = None
 
 def console(*data):
-    if frappe:
-        frappe.publish_realtime("toconsole", data, user=frappe.session.user)
+    frappe.publish_realtime("toconsole", data, user=frappe.session.user)

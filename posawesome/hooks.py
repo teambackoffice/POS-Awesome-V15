@@ -97,7 +97,6 @@ doc_events = {
         "validate": "posawesome.posawesome.api.invoice.validate",
         "before_submit": "posawesome.posawesome.api.invoice.before_submit",
         "before_cancel": "posawesome.posawesome.api.invoice.before_cancel",
-        "on_submit": "posawesome.posawesome.api.invoice.create_delivery_note",
     },
     "Customer": {
         "validate": "posawesome.posawesome.api.customer.validate",
@@ -258,11 +257,8 @@ fixtures = [
                     "POS Profile-posa_allow_reconcile_payments",
                     "POS Profile-column_break_uolvm",
                     "POS Profile-posa_allow_mpesa_reconcile_payments",
-                    "POS Profile-custom_product_bundle",
                     "Sales Invoice-custom_reference_no",
                     "Sales Invoice-custom_reference_name",
-                    "POS Profile-custom_add_reference_details",
-                    "Sales Invoice Item-custom_bundle_id"
                 ),
             ]
         ],
@@ -271,16 +267,16 @@ fixtures = [
         "doctype": "Property Setter",
         "filters": [["name", "in", ("Sales Invoice-posa_pos_opening_shift-no_copy")]],
     },
-    # {
-    #     "doctype": "Custom Field",
-    #     "filters": [
-    #         [
-    #             "name",
-    #             "in",
-    #             [
-    #                 "POS Profile-posa_allow_multi_currency"
-    #             ]
-    #         ]
-    #     ]
-    # }
+    {
+        "doctype": "Custom Field",
+        "filters": [
+            [
+                "name",
+                "in",
+                [
+                    "POS Profile-posa_allow_multi_currency"
+                ]
+            ]
+        ]
+    }
 ]

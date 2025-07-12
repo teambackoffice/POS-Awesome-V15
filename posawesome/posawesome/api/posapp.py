@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 # Copyright (c) 2020, Youssef Restom and contributors
 # For license information, please see license.txt
@@ -126,6 +127,54 @@ def update_opening_shift_data(data, pos_profile):
     data["stock_settings"].update({"allow_negative_stock": allow_negative_stock})
 
 
+def get_stock_availability(item_code, warehouse):
+    """Get stock availability along with incoming rate and last incoming rate from Stock Ledger Entry"""
+    
+    # Get the latest stock ledger entry for current stock quantity
+    current_stock_data = frappe.db.get_value(
+        "Stock Ledger Entry",
+        filters={
+            "item_code": item_code,
+            "warehouse": warehouse,
+            "is_cancelled": 0,
+        },
+        fieldname=["qty_after_transaction", "incoming_rate"],
+        order_by="posting_date desc, posting_time desc, creation desc",
+        as_dict=True
+    )
+    
+    # Get the last incoming rate (where incoming_rate > 0)
+    last_incoming_data = frappe.db.get_value(
+        "Stock Ledger Entry",
+        filters={
+            "item_code": item_code,
+            "warehouse": warehouse,
+            "is_cancelled": 0,
+            "incoming_rate": [">", 0],
+            "actual_qty": [">", 0]  # Only consider incoming/purchase entries
+        },
+        fieldname=["incoming_rate", "posting_date", "posting_time"],
+        order_by="posting_date desc, posting_time desc, creation desc",
+        as_dict=True
+    )
+    
+    if current_stock_data:
+        result = {
+            "actual_qty": current_stock_data.qty_after_transaction or 0.0,
+            "incoming_rate": current_stock_data.incoming_rate or 0.0,
+            "last_incoming_rate": last_incoming_data.incoming_rate if last_incoming_data else 0.0
+        }
+    else:
+        result = {
+            "actual_qty": 0.0,
+            "incoming_rate": 0.0,
+            "last_incoming_rate": last_incoming_data.incoming_rate if last_incoming_data else 0.0
+        }
+    
+    return result
+
+
+
 @frappe.whitelist()
 def get_items(
     pos_profile, price_list=None, item_group="", search_value="", customer=None
@@ -209,7 +258,8 @@ def get_items(
                 has_batch_no,
                 has_serial_no,
                 max_discount,
-                brand
+                brand,
+                custom_oem_part_number
             FROM
                 `tabItem`
             WHERE
@@ -298,11 +348,33 @@ def get_items(
                         },
                         fields=["name as serial_no"],
                     )
+                
+                # Enhanced stock data with last incoming rate
                 item_stock_qty = 0
+                incoming_rate = 0
+                last_incoming_rate = 0
+                
                 if pos_profile.get("posa_display_items_in_stock") or use_limit_search:
-                    item_stock_qty = get_stock_availability(
+                    stock_data = get_stock_availability(
                         item_code, pos_profile.get("warehouse")
                     )
+                    item_stock_qty = stock_data["actual_qty"]
+                    incoming_rate = stock_data["incoming_rate"]
+                    last_incoming_rate = stock_data["last_incoming_rate"]
+                rack_info = {}
+                custom_show_logical_rack = pos_profile.get("custom_show_logical_rack")  # Add this field to POS Profile
+                if custom_show_logical_rack:
+                    rack = frappe.db.sql(""" 
+                        SELECT * FROM `tabLogical Rack` 
+                        WHERE item=%s and pos_profile=%s 
+                    """, (item.item_code, pos_profile.get("name")), as_dict=1)
+                    
+                    if len(rack) > 0:
+                        rack_info = {
+                            'rack': rack[0].rack_id,
+                            'custom_logical_rack': rack[0].rack_id
+                        }
+                
                 attributes = ""
                 if pos_profile.get("posa_show_template_items") and item.has_variants:
                     attributes = get_item_attributes(item.item_code)
@@ -331,8 +403,14 @@ def get_items(
                             "batch_no_data": batch_no_data or [],
                             "attributes": attributes or "",
                             "item_attributes": item_attributes or "",
+                            # Enhanced fields including last incoming rate
+                            "incoming_rate": incoming_rate or 0,
+                            "last_incoming_rate": last_incoming_rate or 0,
+                            "oem_part_number": item.custom_oem_part_number or "",
                         }
                     )
+                    if rack_info:
+                        row.update(rack_info)
                     result.append(row)
         return result
 
@@ -693,6 +771,8 @@ def submit_invoice(invoice, data):
     invoice_doc.flags.ignore_permissions = True
     frappe.flags.ignore_account_permission = True
     invoice_doc.posa_is_printed = 1
+    invoice_doc.flags.ignore_version_check = True
+    invoice_doc.reload()
     invoice_doc.save()
 
     if data.get("due_date"):
@@ -987,6 +1067,7 @@ def get_items_details(pos_profile, items_data):
         pos_profile = json.loads(pos_profile)
         items_data = json.loads(items_data)
         warehouse = pos_profile.get("warehouse")
+        custom_show_logical_rack = pos_profile.get("custom_show_logical_rack")
         result = []
 
         if len(items_data) > 0:
@@ -998,10 +1079,20 @@ def get_items_details(pos_profile, items_data):
                 elif frappe.cache().get_value('bin_qty_cache'):
                     frappe.cache().delete_value('bin_qty_cache')
                 
-                item_stock_qty = get_stock_availability(item_code, warehouse)
-                (has_batch_no, has_serial_no) = frappe.db.get_value(
-                    "Item", item_code, ["has_batch_no", "has_serial_no"]
+                # Get enhanced stock data with last incoming rate
+                stock_data = get_stock_availability(item_code, warehouse)
+                
+                # Get enhanced item details
+                item_details = frappe.db.get_value(
+                    "Item", 
+                    item_code, 
+                    ["has_batch_no", "has_serial_no", "custom_oem_part_number"],
+                    as_dict=True
                 )
+                
+                has_batch_no = item_details.has_batch_no if item_details else 0
+                has_serial_no = item_details.has_serial_no if item_details else 0
+                
                 uoms = frappe.get_all(
                     "UOM Conversion Detail",
                     filters={"parent": item_code},
@@ -1052,6 +1143,20 @@ def get_items_details(pos_profile, items_data):
                                     }
                                 )
 
+                # Get logical rack information from Logical Rack doctype
+                rack_info = {}
+                if custom_show_logical_rack:
+                    rack = frappe.db.sql(""" 
+                        SELECT * FROM `tabLogical Rack` 
+                        WHERE item=%s and pos_profile=%s 
+                    """, (item_code, pos_profile.get("name")), as_dict=1)
+                    
+                    if len(rack) > 0:
+                        rack_info = {
+                            'rack': rack[0].rack_id,
+                            'custom_logical_rack': rack[0].rack_id
+                        }
+
                 row = {}
                 row.update(item)
                 row.update(
@@ -1059,17 +1164,25 @@ def get_items_details(pos_profile, items_data):
                         "item_uoms": uoms or [],
                         "serial_no_data": serial_no_data or [],
                         "batch_no_data": batch_no_data or [],
-                        "actual_qty": item_stock_qty or 0,
+                        "actual_qty": stock_data["actual_qty"],
                         "has_batch_no": has_batch_no,
                         "has_serial_no": has_serial_no,
+                        # Enhanced fields including last incoming rate
+                        "incoming_rate": stock_data["incoming_rate"],
+                        "last_incoming_rate": stock_data["last_incoming_rate"],
+                        "oem_part_number": item_details.custom_oem_part_number if item_details else "",
                     }
                 )
+
+                # Add logical rack data if available
+                if rack_info:
+                    row.update(rack_info)
 
                 result.append(row)
 
         return result
 
-    # Skip cache to ensure fresh stock quantities on every request
+    # Skip cache to ensure fresh stock quantities and incoming rates on every request
     return _get_items_details(pos_profile, items_data)
 
 
@@ -1079,6 +1192,7 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None):
     today = nowdate()
     item_code = item.get("item_code")
     batch_no_data = []
+    
     if warehouse and item.get("has_batch_no"):
         batch_list = get_batch_qty(warehouse=warehouse, item_code=item_code)
         if batch_list:
@@ -1107,8 +1221,56 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None):
         doc,
         overwrite_warehouse=False,
     )
+    
+    # Enhanced stock and item details with last incoming rate
     if item.get("is_stock_item") and warehouse:
-        res["actual_qty"] = get_stock_availability(item_code, warehouse)
+        stock_data = get_stock_availability(item_code, warehouse)
+        res["actual_qty"] = stock_data["actual_qty"]
+        res["incoming_rate"] = stock_data["incoming_rate"]
+        res["last_incoming_rate"] = stock_data["last_incoming_rate"]
+
+    # Get enhanced item details
+    item_details = frappe.db.get_value(
+        "Item",
+        item_code,
+        ["custom_oem_part_number"],
+        as_dict=True
+    )
+
+    if item_details:
+        res["oem_part_number"] = item_details.custom_oem_part_number or ""
+        # Use item's custom_rak_location as fallback
+        res["logical_rack"] = item_details.custom_rak_location or ""
+    else:
+        res["oem_part_number"] = ""
+        res["logical_rack"] = ""
+    
+    # FIXED: Get logical rack information from Logical Rack doctype
+    if doc:  # doc should contain pos_profile information
+        doc_dict = json.loads(doc) if isinstance(doc, str) else doc
+        pos_profile_name = doc_dict.get("pos_profile") if doc_dict else None
+        
+        if pos_profile_name:
+            pos_profile_doc = frappe.get_doc("POS Profile", pos_profile_name)
+            custom_show_logical_rack = pos_profile_doc.get("custom_show_logical_rack")
+            
+            if custom_show_logical_rack:
+                # Query the Logical Rack doctype
+                rack = frappe.db.sql(""" 
+                    SELECT rack_id FROM `tabLogical Rack` 
+                    WHERE item=%s AND pos_profile=%s 
+                    LIMIT 1
+                """, (item_code, pos_profile_name), as_dict=1)
+                
+                if rack and len(rack) > 0:
+                    rack_id = rack[0].rack_id
+                    res["rack"] = rack_id
+                    res["custom_logical_rack"] = rack_id
+                    res["logical_rack"] = rack_id  # Override the fallback value
+                    print(f"Found logical rack for {item_code}: {rack_id}")  # Debug log
+                else:
+                    print(f"No logical rack found for {item_code} in POS Profile {pos_profile_name}")  # Debug log
+    
     res["max_discount"] = max_discount
     res["batch_no_data"] = batch_no_data
     
@@ -1134,24 +1296,6 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None):
     res["item_uoms"] = uoms
     
     return res
-
-
-def get_stock_availability(item_code, warehouse):
-    actual_qty = (
-        frappe.db.get_value(
-            "Stock Ledger Entry",
-            filters={
-                "item_code": item_code,
-                "warehouse": warehouse,
-                "is_cancelled": 0,
-            },
-            fieldname="qty_after_transaction",
-            order_by="posting_date desc, posting_time desc, creation desc",
-        )
-        or 0.0
-    )
-    return actual_qty
-
 
 @frappe.whitelist()
 def create_customer(
@@ -2164,6 +2308,18 @@ def search_serial_or_batch_or_barcode_number(search_value, search_serial_no):
     )
     if barcode_data:
         return barcode_data
+    
+    # Search by OEM part number
+    oem_data = frappe.db.get_value(
+        "Item",
+        {"custom_oem_part_number": search_value, "disabled": 0},
+        ["name as item_code", "custom_oem_part_number"],
+        as_dict=True
+    )
+    if oem_data:
+        return {"item_code": oem_data.item_code, "oem_part_number": oem_data.custom_oem_part_number}
+    
+
     # search serial no
     if search_serial_no:
         serial_no_data = frappe.db.get_value(
@@ -2178,7 +2334,6 @@ def search_serial_or_batch_or_barcode_number(search_value, search_serial_no):
     if batch_no_data:
         return batch_no_data
     return {}
-
 
 def get_seearch_items_conditions(item_code, serial_no, batch_no, barcode):
     if serial_no or batch_no or barcode:
@@ -2262,26 +2417,3 @@ def get_available_currencies():
     """Get list of available currencies from ERPNext"""
     return frappe.get_all("Currency", fields=["name", "currency_name"], 
                          filters={"enabled": 1}, order_by="currency_name")
-
-@frappe.whitelist()
-def get_product_bundle(item_code, pos_profile):
-   
-    bundle_name = frappe.get_value("Product Bundle", {"new_item_code": item_code}, "name")
-    
-    if not bundle_name:
-        return None 
-
-    bundle = frappe.get_doc("Product Bundle", bundle_name)
-
-    return {
-        "name": bundle.name,
-        "items": [
-            {
-                "item_code": item.item_code,
-                "qty": item.qty,
-                "rate": item.rate,
-                "uom": item.uom
-            }
-            for item in bundle.items
-        ]
-    }
