@@ -58,7 +58,7 @@
             {{ __("Cancel") }}
           </v-btn>
 
-          <v-btn color="primary" variant="elevated" @click="proceed_to_payment"
+          <v-btn color="primary" variant="elevated" @click="confirm_reference_and_proceed"
             prepend-icon="mdi-credit-card" :disabled="!reference_no || !reference_name" class="ml-3">
             {{ __("Proceed to Payment") }}
           </v-btn>
@@ -1981,14 +1981,14 @@ export default {
         }
 
         // Check if reference details are required
-        // if (this.pos_profile.custom_add_reference_details) {
-        //   console.log('Reference details required - showing dialog');
-        //   this.reference_no = '';
-        //   this.reference_name = '';
-        //   this.reference_dialog = true;
+        if (this.pos_profile.custom_add_reference_details) {
+          console.log('Reference details required - showing dialog');
+          this.reference_no = '';
+          this.reference_name = '';
+          this.reference_dialog = true;
 
-        //   return;
-        // }
+          return;
+        }
 
 
         // If no reference required, proceed directly to payment
@@ -2162,34 +2162,34 @@ export default {
     },
 
     // Add this new method to handle reference dialog confirmation
-    // async confirm_reference_and_proceed() {
-    //   try {
-    //     // Validate reference fields if required
-    //     if (this.pos_profile.custom_add_reference_details) {
-    //       if (!this.reference_no || !this.reference_name) {
-    //         this.eventBus.emit("show_message", {
-    //           title: __("Please fill in both reference number and reference name"),
-    //           color: "error"
-    //         });
-    //         return;
-    //       }
-    //     }
+    async confirm_reference_and_proceed() {
+      try {
+        // Validate reference fields if required
+        if (this.pos_profile.custom_add_reference_details) {
+          if (!this.reference_no || !this.reference_name) {
+            this.eventBus.emit("show_message", {
+              title: __("Please fill in both reference number and reference name"),
+              color: "error"
+            });
+            return;
+          }
+        }
 
-    //     // Close the reference dialog
-    //     this.reference_dialog = false;
+        // Close the reference dialog
+        this.reference_dialog = false;
 
-    //     // Proceed with payment processing
-    //     this.process_payment();
+        // Proceed with payment processing
+        await this.process_payment();
 
-    //   } catch (error) {
-    //     console.error('Error in confirm_reference_and_proceed:', error);
-    //     this.eventBus.emit("show_message", {
-    //       title: __("Error processing reference details"),
-    //       color: "error",
-    //       message: error.message
-    //     });
-    //   }
-    // },
+      } catch (error) {
+        console.error('Error in confirm_reference_and_proceed:', error);
+        this.eventBus.emit("show_message", {
+          title: __("Error processing reference details"),
+          color: "error",
+          message: error.message
+        });
+      }
+    },
 
     // Add this method to handle reference dialog cancellation
     cancel_reference_dialog() {
