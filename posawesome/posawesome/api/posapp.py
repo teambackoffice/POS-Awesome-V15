@@ -33,6 +33,13 @@ from posawesome.posawesome.doctype.delivery_charges.delivery_charges import (
 )
 from frappe.utils.caching import redis_cache
 
+def ensure_child_doctype(doc, table_field, child_doctype):
+    """Ensure child rows have the correct doctype set."""
+    for row in doc.get(table_field, []):
+        if not row.get("doctype"):
+            row.doctype = child_doctype
+
+
 
 @frappe.whitelist()
 def get_opening_dialog_data():
@@ -687,8 +694,14 @@ def update_invoice(data):
 def submit_invoice(invoice, data):
     data = json.loads(data)
     invoice = json.loads(invoice)
-    invoice_doc = frappe.get_doc("Sales Invoice", invoice.get("name"))
-    invoice_doc.update(invoice)
+    invoice_name = invoice.get("name")
+    if not invoice_name or not frappe.db.exists("Sales Invoice", invoice_name):
+        created = update_invoice(json.dumps(invoice))
+        invoice_name = created.get("name")
+        invoice_doc = frappe.get_doc("Sales Invoice", invoice_name)
+    else:
+        invoice_doc = frappe.get_doc("Sales Invoice", invoice_name)
+        invoice_doc.update(invoice)
     if invoice.get("posa_delivery_date"):
         invoice_doc.update_stock = 0
     mop_cash_list = [
@@ -758,7 +771,9 @@ def submit_invoice(invoice, data):
                     "allocated_amount": row["credit_to_redeem"],
                 }
 
-                invoice_doc.append("advances", advance_payment)
+                advance_row = invoice_doc.append("advances", {})
+                advance_row.update(advance_payment)
+                ensure_child_doctype(invoice_doc, "advances", "Sales Invoice Advance")
                 invoice_doc.is_pos = 0
                 is_payment_entry = 1
 
@@ -817,7 +832,6 @@ def submit_invoice(invoice, data):
         )
 
     return {"name": invoice_doc.name, "status": invoice_doc.docstatus}
-
 
 def set_batch_nos_for_bundels(doc, warehouse_field, throw=False):
     """Automatically select `batch_no` for outgoing items in item table"""

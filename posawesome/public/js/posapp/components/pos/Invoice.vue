@@ -1928,147 +1928,23 @@ export default {
       }
     },
 
-    // Show payment dialog after validation and processing
-    async show_payment() {
-      try {
-        console.log('Starting show_payment process');
-        console.log('Invoice state before payment:', {
-          invoiceType: this.invoiceType,
-          is_return: this.invoice_doc ? this.invoice_doc.is_return : false,
-          items_count: this.items.length,
-          customer: this.customer
-        });
-
-        if (!this.customer) {
-          console.log('Customer validation failed');
-          this.eventBus.emit("show_message", {
-            title: __(`Select a customer`),
-            color: "error",
-          });
-          return;
-        }
-
-        if (!this.items.length) {
-          console.log('Items validation failed - no items');
-          this.eventBus.emit("show_message", {
-            title: __(`Select items to sell`),
-            color: "error",
-          });
-          return;
-        }
-
-        console.log('Basic validations passed, proceeding to main validation');
-        const isValid = this.validate();
-        console.log('Main validation result:', isValid);
-
-        if (!isValid) {
-          console.log('Main validation failed');
-          return;
-        }
-
-        let invoice_doc;
-        if (this.invoice_doc.doctype == "Sales Order") {
-          console.log('Processing Sales Order payment');
-          invoice_doc = await this.process_invoice_from_order();
-        } else {
-          console.log('Processing regular invoice');
-          invoice_doc = this.process_invoice();
-        }
-
-        if (!invoice_doc) {
-          console.log('Failed to process invoice');
-          return;
-        }
-
-        // Check if reference details are required
-        if (this.pos_profile.custom_add_reference_details) {
-          console.log('Reference details required - showing dialog');
-          this.reference_no = '';
-          this.reference_name = '';
-          this.reference_dialog = true;
-
-          return;
-        }
-
-
-        // If no reference required, proceed directly to payment
-        await this.process_payment();
-
-
-
-        // Update invoice_doc with current currency info
-        invoice_doc.currency = this.selected_currency || this.pos_profile.currency;
-        invoice_doc.conversion_rate = this.exchange_rate || 1;
-
-        // Update totals in invoice_doc to match current calculations
-        invoice_doc.total = this.Total;
-        invoice_doc.grand_total = this.subtotal;
-
-        // Apply rounding to get rounded total
-        invoice_doc.rounded_total = this.roundAmount(this.subtotal);
-        invoice_doc.base_total = this.Total * (1 / this.exchange_rate || 1);
-        invoice_doc.base_grand_total = this.subtotal * (1 / this.exchange_rate || 1);
-        invoice_doc.base_rounded_total = this.roundAmount(invoice_doc.base_grand_total);
-
-        // Check if this is a return invoice
-        if (this.invoiceType === 'Return' || invoice_doc.is_return) {
-          console.log('Preparing RETURN invoice for payment with:', {
-            is_return: invoice_doc.is_return,
-            invoiceType: this.invoiceType,
-            return_against: invoice_doc.return_against,
-            items: invoice_doc.items.length,
-            grand_total: invoice_doc.grand_total
-          });
-
-          // For return invoices, explicitly ensure all amounts are negative
-          invoice_doc.is_return = 1;
-          if (invoice_doc.grand_total > 0) invoice_doc.grand_total = -Math.abs(invoice_doc.grand_total);
-          if (invoice_doc.rounded_total > 0) invoice_doc.rounded_total = -Math.abs(invoice_doc.rounded_total);
-          if (invoice_doc.total > 0) invoice_doc.total = -Math.abs(invoice_doc.total);
-          if (invoice_doc.base_grand_total > 0) invoice_doc.base_grand_total = -Math.abs(invoice_doc.base_grand_total);
-          if (invoice_doc.base_rounded_total > 0) invoice_doc.base_rounded_total = -Math.abs(invoice_doc.base_rounded_total);
-          if (invoice_doc.base_total > 0) invoice_doc.base_total = -Math.abs(invoice_doc.base_total);
-
-          // Ensure all items have negative quantity and amount
-          if (invoice_doc.items && invoice_doc.items.length) {
-            invoice_doc.items.forEach(item => {
-              if (item.qty > 0) item.qty = -Math.abs(item.qty);
-              if (item.stock_qty > 0) item.stock_qty = -Math.abs(item.stock_qty);
-              if (item.amount > 0) item.amount = -Math.abs(item.amount);
-            });
-          }
-        }
-
-        // Get payments with correct sign (positive/negative)
-        invoice_doc.payments = this.get_payments();
-        console.log('Final payment data:', invoice_doc.payments);
-
-        // Double-check return invoice payments are negative
-        if ((this.invoiceType === 'Return' || invoice_doc.is_return) && invoice_doc.payments.length) {
-          invoice_doc.payments.forEach(payment => {
-            if (payment.amount > 0) payment.amount = -Math.abs(payment.amount);
-            if (payment.base_amount > 0) payment.base_amount = -Math.abs(payment.base_amount);
-          });
-          console.log('Ensured negative payment amounts for return:', invoice_doc.payments);
-        }
-
-        console.log('Showing payment dialog with currency:', invoice_doc.currency);
-        this.eventBus.emit("show_payment", "true");
-        this.eventBus.emit("send_invoice_doc_payment", invoice_doc);
-
-      } catch (error) {
-        console.error('Error in show_payment:', error);
-        this.eventBus.emit("show_message", {
-          title: __("Error processing payment"),
-          color: "error",
-          message: error.message
-        });
-      }
-    },
-
 
 
     // Add this new method to handle the payment processing
+    show_payment() {
+      // Check if reference details are required
+      if (this.pos_profile.custom_add_reference_details) {
+        console.log('Reference details required - showing dialog');
+        this.reference_no = '';
+        this.reference_name = '';
+        this.reference_dialog = true;
+        return;
+      }
+  
+      // If no reference required, proceed directly to payment
+      this.process_payment();
+    },
+    
     async process_payment() {
       try {
         let invoice_doc;
@@ -2091,20 +1967,25 @@ export default {
           invoice_doc.custom_reference_name = this.reference_name;
         }
 
+        if (this.customer_po_no || this.custom_location) {
+          invoice_doc.po_no = this.customer_po_no;
+          invoice_doc.custom_location = this.custom_location;
+        }
+
         // Update invoice_doc with current currency info
         invoice_doc.currency = this.selected_currency || this.pos_profile.currency;
         invoice_doc.conversion_rate = this.exchange_rate || 1;
-
+        
         // Update totals in invoice_doc to match current calculations
         invoice_doc.total = this.Total;
         invoice_doc.grand_total = this.subtotal;
-
+        
         // Apply rounding to get rounded total
         invoice_doc.rounded_total = this.roundAmount(this.subtotal);
         invoice_doc.base_total = this.Total * (1 / this.exchange_rate || 1);
         invoice_doc.base_grand_total = this.subtotal * (1 / this.exchange_rate || 1);
         invoice_doc.base_rounded_total = this.roundAmount(invoice_doc.base_grand_total);
-
+        
         // Check if this is a return invoice
         if (this.invoiceType === 'Return' || invoice_doc.is_return) {
           console.log('Preparing RETURN invoice for payment with:', {
@@ -2114,7 +1995,7 @@ export default {
             items: invoice_doc.items.length,
             grand_total: invoice_doc.grand_total
           });
-
+          
           // For return invoices, explicitly ensure all amounts are negative
           invoice_doc.is_return = 1;
           if (invoice_doc.grand_total > 0) invoice_doc.grand_total = -Math.abs(invoice_doc.grand_total);
@@ -2123,7 +2004,7 @@ export default {
           if (invoice_doc.base_grand_total > 0) invoice_doc.base_grand_total = -Math.abs(invoice_doc.base_grand_total);
           if (invoice_doc.base_rounded_total > 0) invoice_doc.base_rounded_total = -Math.abs(invoice_doc.base_rounded_total);
           if (invoice_doc.base_total > 0) invoice_doc.base_total = -Math.abs(invoice_doc.base_total);
-
+          
           // Ensure all items have negative quantity and amount
           if (invoice_doc.items && invoice_doc.items.length) {
             invoice_doc.items.forEach(item => {
@@ -2133,7 +2014,7 @@ export default {
             });
           }
         }
-
+        
         // Get payments with correct sign (positive/negative)
         invoice_doc.payments = this.get_payments();
         console.log('Final payment data:', invoice_doc.payments);
@@ -2160,6 +2041,7 @@ export default {
         });
       }
     },
+
 
     // Add this new method to handle reference dialog confirmation
     async confirm_reference_and_proceed() {
@@ -2190,6 +2072,7 @@ export default {
         });
       }
     },
+
 
     // Add this method to handle reference dialog cancellation
     cancel_reference_dialog() {

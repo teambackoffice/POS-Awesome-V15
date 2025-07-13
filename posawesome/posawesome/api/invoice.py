@@ -14,12 +14,15 @@ from posawesome.posawesome.doctype.delivery_charges.delivery_charges import (
     get_applicable_delivery_charges,
 )
 
-
+ 
+def after_insert(doc, method):
+    disable_rounded_total(doc)
 def validate(doc, method):
     validate_shift(doc)
     set_patient(doc)
     auto_set_delivery_charges(doc)
     calc_delivery_charges(doc)
+    
 
 
 def before_submit(doc, method):
@@ -265,3 +268,13 @@ def validate_shift(doc):
                     shift.name
                 )
             )
+def disable_rounded_total(doc):
+    
+    if doc.pos_profile:
+        allow_rounded_total = frappe.db.get_value(
+            "POS Profile", doc.pos_profile, "disable_rounded_total"
+        )
+        if allow_rounded_total:
+            doc.disable_rounded_total = 1
+        else:
+            doc.disable_rounded_total = 0
