@@ -635,6 +635,12 @@ def update_invoice(data):
     # Set missing values first
     invoice_doc.set_missing_values()
     
+    # Handle disable_rounded_total setting from POS profile
+    if data.get("pos_profile"):
+        pos_profile = frappe.get_doc("POS Profile", data.get("pos_profile"))
+        if pos_profile.get("disable_rounded_total"):
+            invoice_doc.disable_rounded_total = 1
+    
     # Ensure selected currency is preserved after set_missing_values
     if selected_currency:
         invoice_doc.currency = selected_currency
@@ -755,7 +761,9 @@ def submit_invoice(invoice, data):
     # calculating cash
     total_cash = 0
     if data.get("redeemed_customer_credit"):
-        total_cash = invoice_doc.total - float(data.get("redeemed_customer_credit"))
+        # Use the appropriate total based on disable_rounded_total setting
+        invoice_total = invoice_doc.grand_total if invoice_doc.get("disable_rounded_total") else (invoice_doc.rounded_total or invoice_doc.grand_total)
+        total_cash = invoice_total - float(data.get("redeemed_customer_credit"))
 
     is_payment_entry = 0
     if data.get("redeemed_customer_credit"):

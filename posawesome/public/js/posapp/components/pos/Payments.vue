@@ -265,7 +265,7 @@
               persistent-placeholder
             ></v-text-field>
           </v-col>
-          <v-col v-if="invoice_doc.rounded_total" cols="6">
+          <v-col v-if="!pos_profile.disable_rounded_total && invoice_doc.rounded_total" cols="6">
             <v-text-field
               density="compact"
               variant="outlined"
@@ -690,12 +690,17 @@ export default {
     diff_payment() {
       if (!this.invoice_doc) return 0;
       
-      // For multi-currency, use grand_total instead of rounded_total
+      // Determine which total to use based on POS profile setting
       let invoice_total;
-      if (this.pos_profile.posa_allow_multi_currency && 
+      if (this.pos_profile.disable_rounded_total) {
+        // Use grand_total when disable_rounded_total is checked
+        invoice_total = this.flt(this.invoice_doc.grand_total, this.currency_precision);
+      } else if (this.pos_profile.posa_allow_multi_currency && 
           this.invoice_doc.currency !== this.pos_profile.currency) {
+        // For multi-currency, use grand_total instead of rounded_total
         invoice_total = this.flt(this.invoice_doc.grand_total, this.currency_precision);
       } else {
+        // Default behavior: use rounded_total if available, otherwise grand_total
         invoice_total = this.flt(this.invoice_doc.rounded_total || this.invoice_doc.grand_total, this.currency_precision);
       }
       
@@ -712,12 +717,17 @@ export default {
     
     // Calculate change to be given back to customer
     credit_change() {
-      // For multi-currency, use grand_total instead of rounded_total
+      // Determine which total to use based on POS profile setting
       let invoice_total;
-      if (this.pos_profile.posa_allow_multi_currency && 
+      if (this.pos_profile.disable_rounded_total) {
+        // Use grand_total when disable_rounded_total is checked
+        invoice_total = this.flt(this.invoice_doc.grand_total, this.currency_precision);
+      } else if (this.pos_profile.posa_allow_multi_currency && 
           this.invoice_doc.currency !== this.pos_profile.currency) {
+        // For multi-currency, use grand_total instead of rounded_total
         invoice_total = this.flt(this.invoice_doc.grand_total, this.currency_precision);
       } else {
+        // Default behavior: use rounded_total if available, otherwise grand_total
         invoice_total = this.flt(this.invoice_doc.rounded_total || this.invoice_doc.grand_total, this.currency_precision);
       }
       
@@ -847,9 +857,12 @@ export default {
         });
       } else {
         // If credit sale is disabled, set cash payment to invoice total
+        const invoice_total = this.pos_profile.disable_rounded_total ? 
+          this.invoice_doc.grand_total : 
+          (this.invoice_doc.rounded_total || this.invoice_doc.grand_total);
         this.invoice_doc.payments.forEach((payment) => {
           if (payment.mode_of_payment.toLowerCase() === 'cash') {
-            payment.amount = this.invoice_doc.rounded_total || this.invoice_doc.grand_total;
+            payment.amount = invoice_total;
           }
         });
       }
@@ -885,7 +898,9 @@ export default {
       if (!hasPaymentSet) {
         const default_payment = this.invoice_doc.payments.find(payment => payment.default === 1);
         if (default_payment) {
-          const amount = this.invoice_doc.rounded_total || this.invoice_doc.grand_total;
+          const amount = this.pos_profile.disable_rounded_total ? 
+            this.invoice_doc.grand_total : 
+            (this.invoice_doc.rounded_total || this.invoice_doc.grand_total);
           default_payment.amount = -Math.abs(amount);
           if (default_payment.base_amount !== undefined) {
             default_payment.base_amount = -Math.abs(amount);
@@ -908,10 +923,15 @@ export default {
       if (this.invoice_doc.is_return) {
         this.ensureReturnPaymentsAreNegative();
       }
+      // Get the correct invoice total based on POS profile setting
+      let invoice_total = this.pos_profile.disable_rounded_total ? 
+        this.invoice_doc.grand_total : 
+        (this.invoice_doc.rounded_total || this.invoice_doc.grand_total);
+      
       // Validate total payments only if not credit sale and invoice total is not zero
       if (!this.is_credit_sale && !this.invoice_doc.is_return && 
           this.total_payments <= 0 && 
-          (this.invoice_doc.rounded_total || this.invoice_doc.grand_total) > 0) {
+          invoice_total > 0) {
         this.eventBus.emit("show_message", {
           title: `Please enter payment amount`,
           color: "error",
@@ -921,7 +941,7 @@ export default {
       }
       if (!this.is_credit_sale && this.invoice_doc.is_return && 
         this.total_payments >= 0 && 
-        (this.invoice_doc.rounded_total || this.invoice_doc.grand_total) < 0) {
+        invoice_total < 0) {
       this.eventBus.emit("show_message", {
         title: `Please enter refund payment amount for return`,
         color: "error",
@@ -941,24 +961,24 @@ export default {
           }
         });
         if (has_cash_payment) {
-          if (!this.pos_profile.posa_allow_partial_payment && 
-              cash_amount < (this.invoice_doc.rounded_total || this.invoice_doc.grand_total) &&
-              (this.invoice_doc.rounded_total || this.invoice_doc.grand_total) > 0) {
-            this.eventBus.emit("show_message", {
-              title: `Cash payment cannot be less than invoice total when partial payment is not allowed`,
-              color: "error",
-            });
-            frappe.utils.play_sound("error");
-            return;
-          }
+                  if (!this.pos_profile.posa_allow_partial_payment && 
+            cash_amount < invoice_total &&
+            invoice_total > 0) {
+          this.eventBus.emit("show_message", {
+            title: `Cash payment cannot be less than invoice total when partial payment is not allowed`,
+            color: "error",
+          });
+          frappe.utils.play_sound("error");
+          return;
+        }
         }
       }
       // Validate partial payments only if not credit sale and invoice total is not zero
       if (
         !this.is_credit_sale &&
         !this.pos_profile.posa_allow_partial_payment &&
-        this.total_payments < (this.invoice_doc.rounded_total || this.invoice_doc.grand_total) &&
-        (this.invoice_doc.rounded_total || this.invoice_doc.grand_total) > 0
+        this.total_payments < invoice_total &&
+        invoice_total > 0
       ) {
         this.eventBus.emit("show_message", {
           title: `The amount paid is not complete`,
@@ -1020,7 +1040,7 @@ export default {
       }
       if (
         !this.invoice_doc.is_return &&
-        this.redeemed_customer_credit > (this.invoice_doc.rounded_total || this.invoice_doc.grand_total)
+        this.redeemed_customer_credit > invoice_total
       ) {
         this.eventBus.emit("show_message", {
           title: `Cannot redeem customer credit more than invoice total`,
@@ -1125,10 +1145,11 @@ export default {
         }
       });
     },
-    // Set full amount for a payment method (or negative for returns)
     set_full_amount(idx) {
       const isReturn = this.invoice_doc.is_return || this.invoiceType === "Return";
-      let totalAmount = this.invoice_doc.rounded_total || this.invoice_doc.grand_total;
+      let totalAmount = this.pos_profile.disable_rounded_total ? 
+        this.invoice_doc.grand_total : 
+        (this.invoice_doc.rounded_total || this.invoice_doc.grand_total);
       
       console.log('Setting full amount for payment method idx:', idx);
       console.log('Current payments:', JSON.stringify(this.invoice_doc.payments));
@@ -1239,7 +1260,9 @@ export default {
         }).then((r) => {
           const data = r.message;
           if (data.length) {
-            const amount = this.invoice_doc.rounded_total || this.invoice_doc.grand_total;
+            const amount = this.pos_profile.disable_rounded_total ? 
+              this.invoice_doc.grand_total : 
+              (this.invoice_doc.rounded_total || this.invoice_doc.grand_total);
             let remainAmount = amount;
             data.forEach((row) => {
               if (remainAmount > 0) {
@@ -1443,7 +1466,9 @@ export default {
     set_mpesa_payment(payment) {
       this.pos_profile.use_customer_credit = true;
       this.redeem_customer_credit = true;
-      const invoiceAmount = this.invoice_doc.rounded_total || this.invoice_doc.grand_total;
+      const invoiceAmount = this.pos_profile.disable_rounded_total ? 
+        this.invoice_doc.grand_total : 
+        (this.invoice_doc.rounded_total || this.invoice_doc.grand_total);
       let amount = payment.unallocated_amount > invoiceAmount ? invoiceAmount : payment.unallocated_amount;
       amount = amount > 0 ? amount : 0;
       const advance = {
@@ -1471,7 +1496,6 @@ setTodayAsDeliveryDate() {
   this.invoice_doc.posa_delivery_date = this.formatDate(today);
 },
 
-    // Update purchase order date after selection
     update_po_date() {
       this.invoice_doc.po_date = this.formatDate(this.new_po_date);
     },
@@ -1529,7 +1553,6 @@ setTodayAsDeliveryDate() {
       return Math.max(0, this.total_payments - this.invoice_doc.grand_total);
     }
   },
-  // Lifecycle hook: created
   created() {
     // Register keyboard shortcut for payment
     document.addEventListener("keydown", this.shortPay.bind(this));
@@ -1549,6 +1572,23 @@ setTodayAsDeliveryDate() {
         const default_payment = this.invoice_doc.payments.find(
           (payment) => payment.default === 1
         );
+        if (default_payment) {
+          const amount = this.pos_profile.disable_rounded_total
+            ? this.invoice_doc.grand_total
+            : (this.invoice_doc.rounded_total || this.invoice_doc.grand_total);
+
+          if (invoice_doc.is_return) {
+            default_payment.amount = -Math.abs(amount);
+            if (default_payment.base_amount !== undefined) {
+              default_payment.base_amount = -Math.abs(amount);
+            }
+          } else {
+            default_payment.amount = this.flt(amount, this.currency_precision);
+            if (default_payment.base_amount !== undefined) {
+              default_payment.base_amount = this.flt(amount, this.currency_precision);
+            }
+          }
+        }
         this.is_credit_sale = false;
         this.is_write_off_change = false;
         if (invoice_doc.is_return) {
@@ -1568,10 +1608,10 @@ setTodayAsDeliveryDate() {
           }
         } else if (default_payment) {
           // For regular invoices, set positive amount
-          default_payment.amount = this.flt(
-            invoice_doc.rounded_total || invoice_doc.grand_total,
-            this.currency_precision
-          );
+          const amount = this.pos_profile.disable_rounded_total
+            ? this.invoice_doc.grand_total
+            : (this.invoice_doc.rounded_total || this.invoice_doc.grand_total);
+          default_payment.amount = this.flt(amount, this.currency_precision);
         }
         this.loyalty_amount = 0;
         this.redeemed_customer_credit = 0;
