@@ -919,6 +919,17 @@ export default {
         frappe.utils.play_sound("error");
         return;
       }
+      if (!this.is_credit_sale && this.invoice_doc.is_return && 
+        this.total_payments >= 0 && 
+        (this.invoice_doc.rounded_total || this.invoice_doc.grand_total) < 0) {
+      this.eventBus.emit("show_message", {
+        title: `Please enter refund payment amount for return`,
+        color: "error",
+      });
+      frappe.utils.play_sound("error");
+      return;
+    }
+      
       // Validate cash payments when credit sale is off
       if (!this.is_credit_sale && !this.invoice_doc.is_return) {
         let has_cash_payment = false;

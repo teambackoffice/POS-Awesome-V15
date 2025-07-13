@@ -771,8 +771,6 @@ def submit_invoice(invoice, data):
     invoice_doc.flags.ignore_permissions = True
     frappe.flags.ignore_account_permission = True
     invoice_doc.posa_is_printed = 1
-    invoice_doc.flags.ignore_version_check = True
-    invoice_doc.reload()
     invoice_doc.save()
 
     if data.get("due_date"):
@@ -1068,6 +1066,8 @@ def get_items_details(pos_profile, items_data):
         items_data = json.loads(items_data)
         warehouse = pos_profile.get("warehouse")
         custom_show_logical_rack = pos_profile.get("custom_show_logical_rack")
+        show_last_customer_rate = pos_profile.get("custom_show_last_custom_rate", 0)
+        customer = pos_profile.get("customer")
         result = []
 
         if len(items_data) > 0:
@@ -1156,6 +1156,28 @@ def get_items_details(pos_profile, items_data):
                             'rack': rack[0].rack_id,
                             'custom_logical_rack': rack[0].rack_id
                         }
+                item_codes = [item.get("item_code") for item in items_data]
+                last_customer_rates = {}
+                if show_last_customer_rate and customer and item_codes:
+                    customer_rates_data = frappe.db.sql("""
+                        SELECT 
+                            sii.item_code,
+                            sii.rate,
+                            si.posting_date,
+                            ROW_NUMBER() OVER (PARTITION BY sii.item_code ORDER BY si.posting_date DESC, si.creation DESC) as rn
+                        FROM `tabSales Invoice Item` sii
+                        INNER JOIN `tabSales Invoice` si ON si.name = sii.parent
+                        WHERE si.customer = %(customer)s 
+                        AND sii.item_code IN %(item_codes)s
+                        AND si.docstatus = 1
+                    """, {
+                        'customer': customer,
+                        'item_codes': item_codes
+                    }, as_dict=True)
+                    
+                    for rate_data in customer_rates_data:
+                        if rate_data.rn == 1:
+                            last_customer_rates[rate_data.item_code] = rate_data.rate or 0
 
                 row = {}
                 row.update(item)
@@ -1169,7 +1191,7 @@ def get_items_details(pos_profile, items_data):
                         "has_serial_no": has_serial_no,
                         # Enhanced fields including last incoming rate
                         "incoming_rate": stock_data["incoming_rate"],
-                        "last_incoming_rate": stock_data["last_incoming_rate"],
+                        "last_customer_rate": last_customer_rates,
                         "oem_part_number": item_details.custom_oem_part_number if item_details else "",
                     }
                 )
@@ -1185,7 +1207,7 @@ def get_items_details(pos_profile, items_data):
     # Skip cache to ensure fresh stock quantities and incoming rates on every request
     return _get_items_details(pos_profile, items_data)
 
-
+    
 @frappe.whitelist()
 def get_item_detail(item, doc=None, warehouse=None, price_list=None):
     item = json.loads(item)
@@ -1227,7 +1249,6 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None):
         stock_data = get_stock_availability(item_code, warehouse)
         res["actual_qty"] = stock_data["actual_qty"]
         res["incoming_rate"] = stock_data["incoming_rate"]
-        res["last_incoming_rate"] = stock_data["last_incoming_rate"]
 
     # Get enhanced item details
     item_details = frappe.db.get_value(
@@ -1245,17 +1266,23 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None):
         res["oem_part_number"] = ""
         res["logical_rack"] = ""
     
-    # FIXED: Get logical rack information from Logical Rack doctype
+    # Get POS Profile information and last customer rate
+    pos_profile_name = None
+    customer = None
+    show_last_customer_rate = 0
+    
     if doc:  # doc should contain pos_profile information
         doc_dict = json.loads(doc) if isinstance(doc, str) else doc
         pos_profile_name = doc_dict.get("pos_profile") if doc_dict else None
+        customer = doc_dict.get("customer") if doc_dict else None
         
         if pos_profile_name:
             pos_profile_doc = frappe.get_doc("POS Profile", pos_profile_name)
             custom_show_logical_rack = pos_profile_doc.get("custom_show_logical_rack")
+            show_last_customer_rate = pos_profile_doc.get("custom_show_last_custom_rate", 0)
             
+            # Get logical rack information from Logical Rack doctype
             if custom_show_logical_rack:
-                # Query the Logical Rack doctype
                 rack = frappe.db.sql(""" 
                     SELECT rack_id FROM `tabLogical Rack` 
                     WHERE item=%s AND pos_profile=%s 
@@ -1271,8 +1298,32 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None):
                 else:
                     print(f"No logical rack found for {item_code} in POS Profile {pos_profile_name}")  # Debug log
     
+    # Get last customer rate
+    last_customer_rate = 0
+    if show_last_customer_rate and customer and item_code:
+        customer_rates_data = frappe.db.sql("""
+            SELECT 
+                sii.item_code,
+                sii.rate,
+                si.posting_date,
+                ROW_NUMBER() OVER (PARTITION BY sii.item_code ORDER BY si.posting_date DESC, si.creation DESC) as rn
+            FROM `tabSales Invoice Item` sii
+            INNER JOIN `tabSales Invoice` si ON si.name = sii.parent
+            WHERE si.customer = %(customer)s 
+            AND sii.item_code = %(item_code)s
+            AND si.docstatus = 1
+            LIMIT 1
+        """, {
+            'customer': customer,
+            'item_code': item_code
+        }, as_dict=True)
+        
+        if customer_rates_data and len(customer_rates_data) > 0:
+            last_customer_rate = customer_rates_data[0].rate or 0
+    
     res["max_discount"] = max_discount
     res["batch_no_data"] = batch_no_data
+    res["last_customer_rate"] = last_customer_rate
     
     # Add UOMs data directly from item document
     uoms = frappe.get_all(

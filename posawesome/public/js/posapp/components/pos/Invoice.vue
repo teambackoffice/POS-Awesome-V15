@@ -58,7 +58,7 @@
             {{ __("Cancel") }}
           </v-btn>
 
-          <v-btn color="primary" variant="elevated" @click="confirm_reference_and_proceed"
+          <v-btn color="primary" variant="elevated" @click="proceed_to_payment"
             prepend-icon="mdi-credit-card" :disabled="!reference_no || !reference_name" class="ml-3">
             {{ __("Proceed to Payment") }}
           </v-btn>
@@ -211,21 +211,18 @@
             </div>
           </template>
 
-          <!-- Last Incoming Rate Column Template -->
-          <template v-slot:item.last_incoming_rate="{ item }">
-            <div class="d-flex flex-column">
-              <div v-if="item.last_incoming_rate" class="d-flex align-center">
-                <span class="text-purple">
-                  {{ currencySymbol(pos_profile.currency) }}
-                  {{ formatCurrency(item.last_incoming_rate) }}
-                </span>
-              </div>
-              <div v-if="item.last_incoming_date" class="text-grey text-xs">
-                {{ formatDate(item.last_incoming_date) }}
-              </div>
-              <span v-if="!item.last_incoming_rate" class="text-grey">-</span>
-            </div>
-          </template>
+          <!-- Last Customer Rate Column Template -->
+          <template v-slot:item.last_customer_rate="{ item }">             
+          <div class="d-flex flex-column">               
+            <span v-if="item.last_customer_rate && item.last_customer_rate > 0" class="d-flex align-center">                 
+                             
+                {{ currencySymbol(pos_profile.currency) }}                   
+                {{ formatCurrency(item.last_customer_rate) }}                 
+              </span>                          
+           
+            <span v-else class="text-grey">-</span>             
+          </div>           
+        </template>
 
           <!-- Logical Rack Column Template -->
           <template v-slot:item.logical_rack="{ item }">
@@ -598,14 +595,13 @@ export default {
       }
 
       // Add last incoming rate column if enabled in POS profile
-      if (this.pos_profile?.custom_show_last_incoming_rate) {
+      if (this.pos_profile?.custom_show_last_custom_rate) {
         headers.splice(-1, 0, {
-          title: __("Last Inc.Rate"),
-          key: "last_incoming_rate",
+          title: __("LC Rate"),
+          key: "last_customer_rate",
           align: "center"
         });
       }
-
       // Add logical rack column if enabled in POS profile
       if (this.pos_profile?.custom_show_logical_rack) {
         headers.splice(-1, 0, {
@@ -1985,14 +1981,14 @@ export default {
         }
 
         // Check if reference details are required
-        if (this.pos_profile.custom_add_reference_details) {
-          console.log('Reference details required - showing dialog');
-          this.reference_no = '';
-          this.reference_name = '';
-          this.reference_dialog = true;
+        // if (this.pos_profile.custom_add_reference_details) {
+        //   console.log('Reference details required - showing dialog');
+        //   this.reference_no = '';
+        //   this.reference_name = '';
+        //   this.reference_dialog = true;
 
-          return;
-        }
+        //   return;
+        // }
 
 
         // If no reference required, proceed directly to payment
@@ -2166,34 +2162,34 @@ export default {
     },
 
     // Add this new method to handle reference dialog confirmation
-    async confirm_reference_and_proceed() {
-      try {
-        // Validate reference fields if required
-        if (this.pos_profile.custom_add_reference_details) {
-          if (!this.reference_no || !this.reference_name) {
-            this.eventBus.emit("show_message", {
-              title: __("Please fill in both reference number and reference name"),
-              color: "error"
-            });
-            return;
-          }
-        }
+    // async confirm_reference_and_proceed() {
+    //   try {
+    //     // Validate reference fields if required
+    //     if (this.pos_profile.custom_add_reference_details) {
+    //       if (!this.reference_no || !this.reference_name) {
+    //         this.eventBus.emit("show_message", {
+    //           title: __("Please fill in both reference number and reference name"),
+    //           color: "error"
+    //         });
+    //         return;
+    //       }
+    //     }
 
-        // Close the reference dialog
-        this.reference_dialog = false;
+    //     // Close the reference dialog
+    //     this.reference_dialog = false;
 
-        // Proceed with payment processing
-        await this.process_payment();
+    //     // Proceed with payment processing
+    //     this.process_payment();
 
-      } catch (error) {
-        console.error('Error in confirm_reference_and_proceed:', error);
-        this.eventBus.emit("show_message", {
-          title: __("Error processing reference details"),
-          color: "error",
-          message: error.message
-        });
-      }
-    },
+    //   } catch (error) {
+    //     console.error('Error in confirm_reference_and_proceed:', error);
+    //     this.eventBus.emit("show_message", {
+    //       title: __("Error processing reference details"),
+    //       color: "error",
+    //       message: error.message
+    //     });
+    //   }
+    // },
 
     // Add this method to handle reference dialog cancellation
     cancel_reference_dialog() {
@@ -2477,12 +2473,8 @@ export default {
             }
 
             // Update last incoming rate fields
-            if (data.last_incoming_rate !== undefined) {
-              item.last_incoming_rate = data.last_incoming_rate;
-            }
-
-            if (data.last_incoming_date !== undefined) {
-              item.last_incoming_date = data.last_incoming_date;
+            if (data.last_customer_rate !== undefined) {
+              item.last_customer_rate = data.last_customer_rate;
             }
 
             // Update logical rack
