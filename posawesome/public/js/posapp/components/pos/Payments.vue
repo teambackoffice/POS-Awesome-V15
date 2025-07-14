@@ -638,6 +638,7 @@ export default {
       sales_person: "", // Selected sales person
       addresses: [], // List of customer addresses
       is_user_editing_paid_change: false, // User interaction flag
+      previous_payments: [],
     };
   },
   computed: {
@@ -849,23 +850,33 @@ export default {
     // Watch is_credit_sale to reset cash payments
     is_credit_sale(newVal) {
       if (newVal) {
-        // If credit sale is enabled, set cash payment to 0
+        // Save current payments before zeroing
+        this.previous_payments = this.invoice_doc.payments.map(payment => ({ ...payment }));
+        // Set all payment amounts to zero
         this.invoice_doc.payments.forEach((payment) => {
-          if (payment.mode_of_payment.toLowerCase() === 'cash') {
-            payment.amount = 0;
-          }
+          payment.amount = 0;
         });
       } else {
-        // If credit sale is disabled, set cash payment to invoice total
-        const invoice_total = this.pos_profile.disable_rounded_total ? 
-          this.invoice_doc.grand_total : 
-          (this.invoice_doc.rounded_total || this.invoice_doc.grand_total);
-        this.invoice_doc.payments.forEach((payment) => {
-          if (payment.mode_of_payment.toLowerCase() === 'cash') {
-            payment.amount = invoice_total;
-          }
-        });
+        // Restore previous payments if available
+        if (this.previous_payments.length === this.invoice_doc.payments.length) {
+          this.invoice_doc.payments.forEach((payment, idx) => {
+            payment.amount = this.previous_payments[idx].amount;
+          });
+        } else {
+          // Fallback: set cash to total, others to 0
+          const invoice_total = this.pos_profile.disable_rounded_total ? 
+            this.invoice_doc.grand_total : 
+            (this.invoice_doc.rounded_total || this.invoice_doc.grand_total);
+          this.invoice_doc.payments.forEach((payment) => {
+            if (payment.mode_of_payment.toLowerCase().includes('cash')) {
+              payment.amount = invoice_total;
+            } else {
+              payment.amount = 0;
+            }
+          });
+        }
       }
+      this.$forceUpdate();
     },
   },
   methods: {
@@ -1308,6 +1319,7 @@ export default {
         },
       });
     },
+    
     // Filter addresses for autocomplete
     addressFilter(item, queryText, itemText) {
       const searchText = queryText.toLowerCase();
