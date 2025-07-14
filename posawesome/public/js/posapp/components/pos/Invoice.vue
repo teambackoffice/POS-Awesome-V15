@@ -621,7 +621,7 @@ export default {
       // }
 
       // Always add the Offer column at the end
-      headers.push({ title: __("Offer?"), key: "posa_is_offer", align: "center" });
+      // headers.push({ title: __("Offer?"), key: "posa_is_offer", align: "center" });
 
       return headers;
     },
