@@ -878,7 +878,19 @@ export default {
       }
       this.$forceUpdate();
     },
+    customer(newCustomer, oldCustomer) {
+      this.close_payments();
+      this.eventBus.emit("set_customer", this.customer);
+      this.fetch_customer_details();
+      this.fetch_customer_balance();
+      this.set_delivery_charges();
+      // Add this line to refresh LC Rate for all items
+      if (this.items && this.items.length > 0) {
+        this.update_items_details(this.items);
+      }
+    },
   },
+  
   methods: {
     // Go back to invoice view and reset customer readonly
     back_to_invoice() {
