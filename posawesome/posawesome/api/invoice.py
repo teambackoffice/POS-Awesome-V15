@@ -268,13 +268,54 @@ def validate_shift(doc):
                     shift.name
                 )
             )
-def disable_rounded_total(doc):
+
+@frappe.whitelist()
+def get_item_price_for_uom(item_code, price_list, uom, customer=None, company=None, currency=None, conversion_factor=1):
+
+    from erpnext.stock.get_item_details import get_item_price
     
-    if doc.pos_profile:
-        allow_rounded_total = frappe.db.get_value(
-            "POS Profile", doc.pos_profile, "disable_rounded_total"
-        )
-        if allow_rounded_total:
-            doc.disable_rounded_total = 1
-        else:
-            doc.disable_rounded_total = 0
+    item_price_args = {
+        "item_code": item_code,
+        "price_list": price_list,
+        "uom": uom,
+        "customer": customer,
+        "company": company,
+        "currency": currency
+    }
+    
+    # Get item price for specific UOM
+    price_list_rate = get_item_price(item_price_args, item_code, ignore_party=True)
+    
+    if price_list_rate:
+        return {
+            "price_list_rate": price_list_rate[0][1],  # price_list_rate from the tuple
+            "uom": uom,
+            "found_specific_uom": True
+        }
+    
+    item_doc = frappe.get_doc("Item", item_code)
+    stock_uom = item_doc.stock_uom
+    
+    if stock_uom != uom:
+        item_price_args["uom"] = stock_uom
+        base_price = get_item_price(item_price_args, item_code, ignore_party=True)
+        
+        if base_price:
+            uom_conversion = frappe.db.get_value(
+                "UOM Conversion Detail",
+                {"parent": item_code, "uom": uom},
+                "conversion_factor"
+            )
+            
+            if uom_conversion:
+                converted_price = base_price[0][1] * float(uom_conversion)
+                return {
+                    "price_list_rate": converted_price,
+                    "uom": uom,
+                    "found_specific_uom": False,
+                    "converted_from_stock_uom": True,
+                    "stock_uom_price": base_price[0][1],
+                    "conversion_factor": uom_conversion
+                }
+    
+    return None
