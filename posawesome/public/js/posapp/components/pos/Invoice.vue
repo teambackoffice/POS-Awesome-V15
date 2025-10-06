@@ -799,20 +799,20 @@ export default {
     return new_item;
   },
   calculateItemTaxes(item) {
-    const taxRate = item.rate < this.pos_profile.custom_tax_limit ? 5 : 12;
+    const taxRate = item.rate < this.pos_profile.custom_tax_limit ? 5 : 18;
     let tax;
 
     if (taxRate === 5) {
       tax = +(item.rate * (taxRate / 105)).toFixed(2);
     } else {
-      tax = +(item.rate * (taxRate / 112)).toFixed(2);
+      tax = +(item.rate * (taxRate / 118)).toFixed(2);
     }
 
     let preTaxRate;
     if (taxRate === 5) {
       preTaxRate = +((item.rate * 100) / 105).toFixed(2);
     } else {
-      preTaxRate = +((item.rate * 100) / 112).toFixed(2);
+      preTaxRate = +((item.rate * 100) / 118).toFixed(2);
     }
 
     item.tax_rate = taxRate;
@@ -4722,19 +4722,19 @@ updateCounters() {
       }
 
 
-      const taxRate = new_item.rate < this.pos_profile.custom_tax_limit ? 5 : 12;
+      const taxRate = new_item.rate < this.pos_profile.custom_tax_limit ? 5 : 18;
       let tax;
       if (taxRate === 5) {
         tax = +(new_item.rate * (taxRate / 105)).toFixed(2);
       } else {
-        tax = +(new_item.rate * (taxRate / 112)).toFixed(2);
+        tax = +(new_item.rate * (taxRate / 118)).toFixed(2);
       }
 
       let preTaxRate;
       if (taxRate === 5) {
         preTaxRate = +((new_item.rate * 100) / 105).toFixed(2);
       } else {
-        preTaxRate = +((new_item.rate * 100) / 112).toFixed(2);
+        preTaxRate = +((new_item.rate * 100) / 118).toFixed(2);
       }
 
 
