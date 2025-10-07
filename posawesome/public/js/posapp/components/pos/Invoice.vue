@@ -1378,9 +1378,9 @@ autoApplyOffers(availableOffers) {
           }
           // Tax calculations...
           if (!item.tax_rate || !item.tax || !item.pre_tax_rate || !item.b_amount) {
-            const taxRate = item.rate < this.pos_profile.custom_tax_limit ? 5 : 12;
-            let tax = taxRate === 5 ? +(item.rate * (taxRate / 105)).toFixed(2) : +(item.rate * (taxRate / 112)).toFixed(2);
-            let preTaxRate = taxRate === 5 ? +((item.rate * 100) / 105).toFixed(2) : +((item.rate * 100) / 112).toFixed(2);
+            const taxRate = item.rate < this.pos_profile.custom_tax_limit ? 5 : 18;
+            let tax = taxRate === 5 ? +(item.rate * (taxRate / 105)).toFixed(2) : +(item.rate * (taxRate / 118)).toFixed(2);
+            let preTaxRate = taxRate === 5 ? +((item.rate * 100) / 105).toFixed(2) : +((item.rate * 100) / 118).toFixed(2);
 
             item.tax_rate = taxRate;
             item.tax = tax.toFixed(2);
@@ -2731,19 +2731,19 @@ autoApplyOffers(availableOffers) {
           item.base_discount_amount = item.price_list_rate;
           item.discount_percentage = 100;
         }
-        const taxRate = item.rate < this.pos_profile.custom_tax_limit ? 5 : 12;
+        const taxRate = item.rate < this.pos_profile.custom_tax_limit ? 5 : 18;
         let tax;
         if (taxRate === 5) {
           tax = +(item.rate * (taxRate / 105)).toFixed(2);
         } else {
-          tax = +(item.rate * (taxRate / 112)).toFixed(2);
+          tax = +(item.rate * (taxRate / 118)).toFixed(2);
         }
 
         let preTaxRate;
         if (taxRate === 5) {
           preTaxRate = +((item.rate * 100) / 105).toFixed(2);
         } else {
-          preTaxRate = +((item.rate * 100) / 112).toFixed(2);
+          preTaxRate = +((item.rate * 100) / 118).toFixed(2);
         }
 
 
@@ -4511,14 +4511,14 @@ updateCounters() {
       item.base_amount = this.flt(item.qty * (item.base_rate || item.rate), this.currency_precision);
 
       // Calculate taxes (using your existing logic)
-      const taxRate = item.rate < this.pos_profile.custom_tax_limit ? 5 : 12;
+      const taxRate = item.rate < this.pos_profile.custom_tax_limit ? 5 : 18;
       let tax = taxRate === 5 ?
         +(item.rate * (taxRate / 105)).toFixed(2) :
-        +(item.rate * (taxRate / 112)).toFixed(2);
+        +(item.rate * (taxRate / 118)).toFixed(2);
 
       let preTaxRate = taxRate === 5 ?
         +((item.rate * 100) / 105).toFixed(2) :
-        +((item.rate * 100) / 112).toFixed(2);
+        +((item.rate * 100) / 118).toFixed(2);
 
       item.tax_rate = taxRate;
       item.tax = tax.toFixed(2);
@@ -4826,20 +4826,20 @@ updateCounters() {
             item.amount = this.flt(item.qty * item.rate, this.currency_precision);
             item.base_amount = this.flt(item.qty * item.base_rate, this.currency_precision);
 
-            const taxRate = item.rate < this.pos_profile.custom_tax_limit ? 5 : 12;
+            const taxRate = item.rate < this.pos_profile.custom_tax_limit ? 5 : 18;
             let tax;
 
             if (taxRate === 5) {
               tax = +(item.rate * (taxRate / 105)).toFixed(2);
             } else {
-              tax = +(item.rate * (taxRate / 112)).toFixed(2);
+              tax = +(item.rate * (taxRate / 118)).toFixed(2);
             }
 
             let preTaxRate;
             if (taxRate === 5) {
               preTaxRate = +((item.rate * 100) / 105).toFixed(2);
             } else {
-              preTaxRate = +((item.rate * 100) / 112).toFixed(2);
+              preTaxRate = +((item.rate * 100) / 118).toFixed(2);
             }
 
             item.tax_rate = taxRate;
