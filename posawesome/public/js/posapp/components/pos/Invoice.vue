@@ -799,7 +799,7 @@ export default {
     return new_item;
   },
   calculateItemTaxes(item) {
-    const taxRate = item.rate < this.pos_profile.custom_tax_limit ? 5 : 18;
+    const taxRate = this.determineItemTaxRate(item);
     let tax;
 
     if (taxRate === 5) {
@@ -819,6 +819,116 @@ export default {
     item.tax = tax.toFixed(2);
     item.pre_tax_rate = preTaxRate.toFixed(2);
     item.b_amount = (preTaxRate * item.qty).toFixed(2);
+  },
+
+  /**
+   * Determine tax rate for an item based on:
+   * 1. Item-level tax template configuration (priority)
+   * 2. POS profile tax limit (fallback)
+   * 
+   * Enhanced to support dynamic tax rate selection based on item rate ranges.
+   * Handles Scenario 2: Multiple templates with different rate ranges.
+   * Uses static template name mapping as most reliable method.
+   */
+  determineItemTaxRate(item) {
+    // Static mapping of template names to tax rates (most reliable)
+    const TEMPLATE_TAX_RATE_MAP = {
+      "GST 5% - EAS": 5,
+      "GST 18% - EAS": 18,
+      "GST 12% - EAS": 12,
+      "GST 28% - EAS": 28,
+      "GST 0% - EAS": 0,
+      // Add more mappings as needed
+    };
+    
+    // Debug: Log initial call
+    console.log(`🔍 [Tax Determination] Called for ${item.item_code}, rate: ${item.rate}`);
+    console.log(`🔍 [Tax Determination] item.item_tax_templates exists:`, !!item.item_tax_templates);
+    console.log(`🔍 [Tax Determination] item.item_tax_templates value:`, item.item_tax_templates);
+    
+    // First, check if item has tax template configuration
+    if (item.item_tax_templates && Array.isArray(item.item_tax_templates) && item.item_tax_templates.length > 0) {
+      console.log(`✅ [Tax Determination] Found ${item.item_tax_templates.length} tax template(s) for ${item.item_code}`);
+      
+      // Filter templates for "In-State" tax category (or match current context)
+      const inStateTaxTemplates = item.item_tax_templates.filter(template => 
+        template.tax_category === "In-State"
+      );
+
+      console.log(`🔍 [Tax Determination] In-State templates count: ${inStateTaxTemplates.length}`);
+
+      if (inStateTaxTemplates.length > 0) {
+        // Find applicable template based on item rate and min/max net rate
+        // Sort by minimum_net_rate descending to check higher ranges first
+        const sortedTemplates = inStateTaxTemplates.sort((a, b) => 
+          (b.minimum_net_rate || 0) - (a.minimum_net_rate || 0)
+        );
+
+        for (const template of sortedTemplates) {
+          const minRate = template.minimum_net_rate || 0;
+          const maxRate = template.maximum_net_rate || 999999999;
+          
+          console.log(`🔍 [Tax Determination] Checking template: ${template.item_tax_template}, range: [${minRate}-${maxRate}]`);
+          
+          // Check if item rate falls within the template's range
+          if (item.rate >= minRate && item.rate <= maxRate) {
+            console.log(`✅ [Tax Determination] Rate ${item.rate} matches range [${minRate}-${maxRate}]`);
+            
+            let extractedRate = null;
+            const templateName = template.item_tax_template || "";
+            
+            // METHOD 1: Static mapping by exact template name (MOST RELIABLE)
+            if (TEMPLATE_TAX_RATE_MAP.hasOwnProperty(templateName)) {
+              extractedRate = TEMPLATE_TAX_RATE_MAP[templateName];
+              console.log(`🎯 STATIC MAPPING: Using hardcoded rate ${extractedRate}% for template "${templateName}"`);
+              return extractedRate;
+            }
+            
+            // METHOD 2: Use pre-extracted actual_tax_rate from backend
+            if (template.actual_tax_rate !== null && template.actual_tax_rate !== undefined) {
+              extractedRate = parseFloat(template.actual_tax_rate);
+              console.log(`💡 Using pre-extracted tax rate: ${extractedRate}% for ${item.item_code} (${templateName}, rate: ${item.rate}, range: [${minRate}-${maxRate}])`);
+              return extractedRate;
+            }
+            
+            // METHOD 3: Extract from template details
+            if (template.template_details && template.template_details.length > 0) {
+              const taxDetail = template.template_details[0];
+              if (taxDetail.tax_rate) {
+                extractedRate = parseFloat(taxDetail.tax_rate);
+                console.log(`💡 Using template detail tax rate: ${extractedRate}% for ${item.item_code} (${templateName}, rate: ${item.rate}, range: [${minRate}-${maxRate}])`);
+                return extractedRate;
+              }
+            }
+            
+            // METHOD 4: Fallback - Parse from template name (e.g., "GST 18% - EAS" → 18)
+            const rateMatch = templateName.match(/(\d+(?:\.\d+)?)\s*%/);
+            if (rateMatch) {
+              extractedRate = parseFloat(rateMatch[1]);
+              console.log(`💡 Using parsed tax rate from name: ${extractedRate}% for ${item.item_code} (${templateName}, rate: ${item.rate}, range: [${minRate}-${maxRate}])`);
+              return extractedRate;
+            }
+            
+            // If we reached here, template matched but couldn't extract rate
+            console.warn(`⚠️ Template matched but no tax rate found for ${item.item_code} (${templateName})`);
+          } else {
+            console.log(`❌ [Tax Determination] Rate ${item.rate} NOT in range [${minRate}-${maxRate}]`);
+          }
+        }
+        
+        // No template matched the current rate range
+        console.log(`📝 No tax template matched rate ${item.rate} for ${item.item_code}, falling back to POS profile logic`);
+      } else {
+        console.log(`⚠️ [Tax Determination] No In-State templates found for ${item.item_code}`);
+      }
+    } else {
+      console.log(`❌ [Tax Determination] No item_tax_templates available for ${item.item_code} - using POS profile fallback`);
+    }
+
+    // Fallback to POS profile tax limit logic
+    const taxRate = item.rate < this.pos_profile.custom_tax_limit ? 5 : 18;
+    console.log(`📋 Using POS profile tax limit logic: ${taxRate}% for ${item.item_code} (rate: ${item.rate}, limit: ${this.pos_profile.custom_tax_limit})`);
+    return taxRate;
   },
 
 
@@ -1378,7 +1488,7 @@ autoApplyOffers(availableOffers) {
           }
           // Tax calculations...
           if (!item.tax_rate || !item.tax || !item.pre_tax_rate || !item.b_amount) {
-            const taxRate = item.rate < this.pos_profile.custom_tax_limit ? 5 : 18;
+            const taxRate = this.determineItemTaxRate(item);
             let tax = taxRate === 5 ? +(item.rate * (taxRate / 105)).toFixed(2) : +(item.rate * (taxRate / 118)).toFixed(2);
             let preTaxRate = taxRate === 5 ? +((item.rate * 100) / 105).toFixed(2) : +((item.rate * 100) / 118).toFixed(2);
 
@@ -2554,6 +2664,31 @@ autoApplyOffers(availableOffers) {
             item.has_serial_no = data.has_serial_no;
             item.has_batch_no = data.has_batch_no;
 
+            // Store item tax templates for intelligent tax calculation
+            if (data.item_tax_templates) {
+              item.item_tax_templates = data.item_tax_templates;
+              console.log(`📊 Item tax templates loaded for ${item.item_code}:`, data.item_tax_templates);
+              
+              // CRITICAL FIX: Recalculate taxes now that templates are loaded
+              vm.calculateItemTaxes(item);
+              console.log(`🔄 Recalculated taxes for ${item.item_code} with template data - Tax Rate: ${item.tax_rate}%`);
+              
+              // Force reactive update by replacing item in array (Vue 3 reactivity)
+              const itemIndex = vm.items.findIndex(i => i.posa_row_id === item.posa_row_id);
+              if (itemIndex !== -1) {
+                // Create new object to trigger reactivity
+                vm.items[itemIndex] = { ...vm.items[itemIndex] };
+              }
+              
+              // Force UI update
+              vm.$forceUpdate();
+              vm.$nextTick(() => {
+                console.log(`✅ UI updated for ${item.item_code} - Tax Rate in data: ${item.tax_rate}%`);
+              });
+            } else {
+              console.log(`⚠️ No tax templates returned for ${item.item_code}, using fallback logic`);
+            }
+
             // Calculate final amount
             item.amount = vm.flt(item.qty * item.rate, vm.currency_precision);
             item.base_amount = vm.flt(item.qty * item.base_rate, vm.currency_precision);
@@ -2731,7 +2866,7 @@ autoApplyOffers(availableOffers) {
           item.base_discount_amount = item.price_list_rate;
           item.discount_percentage = 100;
         }
-        const taxRate = item.rate < this.pos_profile.custom_tax_limit ? 5 : 18;
+        const taxRate = this.determineItemTaxRate(item);
         let tax;
         if (taxRate === 5) {
           tax = +(item.rate * (taxRate / 105)).toFixed(2);
@@ -4510,8 +4645,8 @@ updateCounters() {
       item.amount = this.flt(item.qty * item.rate, this.currency_precision);
       item.base_amount = this.flt(item.qty * (item.base_rate || item.rate), this.currency_precision);
 
-      // Calculate taxes (using your existing logic)
-      const taxRate = item.rate < this.pos_profile.custom_tax_limit ? 5 : 18;
+      // Calculate taxes (using intelligent tax determination)
+      const taxRate = this.determineItemTaxRate(item);
       let tax = taxRate === 5 ?
         +(item.rate * (taxRate / 105)).toFixed(2) :
         +(item.rate * (taxRate / 118)).toFixed(2);
@@ -4722,7 +4857,7 @@ updateCounters() {
       }
 
 
-      const taxRate = new_item.rate < this.pos_profile.custom_tax_limit ? 5 : 18;
+      const taxRate = this.determineItemTaxRate(new_item);
       let tax;
       if (taxRate === 5) {
         tax = +(new_item.rate * (taxRate / 105)).toFixed(2);
@@ -4826,7 +4961,7 @@ updateCounters() {
             item.amount = this.flt(item.qty * item.rate, this.currency_precision);
             item.base_amount = this.flt(item.qty * item.base_rate, this.currency_precision);
 
-            const taxRate = item.rate < this.pos_profile.custom_tax_limit ? 5 : 18;
+            const taxRate = this.determineItemTaxRate(item);
             let tax;
 
             if (taxRate === 5) {

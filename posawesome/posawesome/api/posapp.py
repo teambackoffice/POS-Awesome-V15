@@ -498,6 +498,79 @@ def add_taxes_from_tax_template(item, parent_doc):
                     tax_row.update({"category": "Total", "add_deduct_tax": "Add"})
                 tax_row.db_insert()
 
+def get_item_tax_templates(item_code):
+    """
+    Fetch item tax templates with tax category, minimum and maximum net rates
+    for determining applicable tax rate in POS.
+    Supports dynamic tax rate selection based on item rate ranges.
+    Uses static template name mapping as primary method for reliability.
+    """
+    
+    # Static mapping of template names to tax rates (primary method)
+    TEMPLATE_TAX_RATE_MAP = {
+        "GST 5% - EAS": 5.0,
+        "GST 18% - EAS": 18.0,
+        "GST 12% - EAS": 12.0,
+        "GST 28% - EAS": 28.0,
+        "GST 0% - EAS": 0.0,
+        # Add more mappings as needed
+    }
+    
+    try:
+        # Query the Item's taxes child table directly
+        item_doc = frappe.get_cached_doc("Item", item_code)
+        
+        if not item_doc or not hasattr(item_doc, 'taxes'):
+            return []
+        
+        tax_templates = []
+        for item_tax_row in item_doc.taxes:
+            if item_tax_row.item_tax_template:
+                # Get the full Item Tax Template document
+                tax_template_doc = frappe.get_cached_doc("Item Tax Template", item_tax_row.item_tax_template)
+                
+                # Extract tax rate from template details
+                template_details = []
+                total_tax_rate = 0.0  # Sum all component tax rates (CGST + SGST = Total GST)
+                
+                if hasattr(tax_template_doc, 'taxes'):
+                    for tax_detail in tax_template_doc.taxes:
+                        rate = flt(tax_detail.tax_rate)
+                        template_details.append({
+                            "tax_type": tax_detail.tax_type,
+                            "tax_rate": rate
+                        })
+                        # Sum all tax rates (e.g., CGST 9% + SGST 9% = 18% total)
+                        total_tax_rate += rate
+                
+                # METHOD 1: Static mapping (most reliable)
+                template_name = item_tax_row.item_tax_template
+                if template_name in TEMPLATE_TAX_RATE_MAP:
+                    actual_tax_rate = TEMPLATE_TAX_RATE_MAP[template_name]
+                    frappe.logger().info(f"POS Tax: Using static mapping for {template_name}: {actual_tax_rate}%")
+                # METHOD 2: Use summed total from template details
+                elif total_tax_rate > 0:
+                    actual_tax_rate = total_tax_rate
+                    frappe.logger().info(f"POS Tax: Using summed rate for {template_name}: {actual_tax_rate}%")
+                else:
+                    actual_tax_rate = None
+                    frappe.logger().warning(f"POS Tax: No tax rate found for {template_name}")
+                
+                tax_templates.append({
+                    "item_tax_template": item_tax_row.item_tax_template,
+                    "tax_category": item_tax_row.tax_category or "",
+                    "minimum_net_rate": flt(item_tax_row.minimum_net_rate) or 0,
+                    "maximum_net_rate": flt(item_tax_row.maximum_net_rate) or 999999999,
+                    "valid_from": item_tax_row.valid_from if hasattr(item_tax_row, 'valid_from') else None,
+                    "template_details": template_details,
+                    "actual_tax_rate": actual_tax_rate  # Pre-extracted TOTAL tax rate (static mapping or sum)
+                })
+        
+        return tax_templates
+    except Exception as e:
+        frappe.log_error(f"Error fetching item tax templates for {item_code}: {str(e)}", "POS Tax Template Error")
+        return []
+
 def validate_return_items(original_invoice_name, return_items):
     """
     Ensure that return items do not exceed the quantity from the original invoice.
@@ -1174,6 +1247,9 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None):
             uoms.append({"uom": stock_uom, "conversion_factor": 1.0})
     
     res["item_uoms"] = uoms
+    
+    # Add item tax template information for POS tax calculation
+    res["item_tax_templates"] = get_item_tax_templates(item_code)
     
     return res
 
